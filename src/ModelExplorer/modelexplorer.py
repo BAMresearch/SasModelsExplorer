@@ -6,7 +6,9 @@ import sasmodels.core
 import sasmodels.direct_model
 import numpy as np
 import matplotlib.pyplot as plt
+# import sip
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
 
 class SasModelApp(QMainWindow):
     model = None
@@ -32,10 +34,10 @@ class SasModelApp(QMainWindow):
         self.control_layout.addRow("Model:", self.model_input)
         self.model_input.returnPressed.connect(self.load_model_parameters)
 
-        # Button to reload model based on input
-        load_button = QPushButton("Load Model")
-        load_button.clicked.connect(self.load_model_parameters)
-        self.control_layout.addWidget(load_button)
+        # # Button to reload model based on input
+        # load_button = QPushButton("Load Model")
+        # load_button.clicked.connect(self.load_model_parameters)
+        # self.control_layout.addWidget(load_button)
 
         # Scroll area for parameters
         scroll_widget = QWidget()
@@ -87,6 +89,45 @@ class SasModelApp(QMainWindow):
         self.model_parameters = {}
         self.load_model_parameters()
 
+    def remove_layout_and_widgets(self, item, starting_index:int=0):
+        # Clear only parameter-specific widgets in the control layout
+        if hasattr(item, "layout"):
+            if callable(item.layout):
+                layout = item.layout()
+        else:
+            layout = None
+
+        if hasattr(item, "widget"):
+            if callable(item.widget):
+                widget = item.widget()
+        else:
+            widget = None
+
+        if widget:
+            widget.deleteLater()
+            widget=None
+            # widget.setParent(None)
+        elif layout:
+            for i in reversed(range(layout.count())):
+                if i>=starting_index:
+                    self.remove_layout_and_widgets(layout.itemAt(i))
+                    
+        # while layout.count() > starting_index:  # Start clearing after model_input
+        #     print('ping')
+        #     item = layout.takeAt(starting_index)  # Always take the second item since index 0 is preserved
+        #     print(item) # these are layout objects or widgets. if layout objects, go deeper
+        #     if isinstance(item, QHBoxLayout):
+        #         # hopefully we'll hit widgets at some point. 
+        #         self.remove_layout_and_widgets(item, starting_index=0)
+            
+        #     widget = item.widget()
+        #     if widget:
+        #         layout.removeWidget(widget)
+        #         # sip.delete(widget)
+        #         # widget.deleteLater()
+        #         widget.setParent(None)
+        #         widget = None
+
     def load_model_parameters(self):
         model_name = self.model_input.text()
         try:
@@ -94,15 +135,7 @@ class SasModelApp(QMainWindow):
             self.model_info = sasmodels.core.load_model_info(model_name)
             self.model_parameters = self.model_info.parameters.defaults.copy()
 
-            # Clear only parameter-specific widgets in the control layout
-            while self.control_layout.count() > 2:  # Start clearing after model_input and load_button
-                item = self.control_layout.takeAt(2)  # Always take the third item since index 0 and 1 are preserved
-                widget = item.widget()
-                if widget:
-                    self.control_layout.removeWidget(widget)
-                    widget.deleteLater()
-                    widget = None
-
+            self.remove_layout_and_widgets(self.control_layout, starting_index=2)
             # Reset the parameter-specific dictionaries to clear any previous model data
             self.parameter_sliders.clear()
             self.parameter_inputs.clear()
