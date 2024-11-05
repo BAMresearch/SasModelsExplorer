@@ -125,21 +125,26 @@ class SasModelApp(QMainWindow):
             self.parameter_inputs.clear()
 
             # Dynamically add sliders and input boxes for each model parameter
-            for param, default_value in self.model_parameters.items():
-                # Skip parameters matching exclusion patterns
-                if any(re.match(pattern, param) for pattern in self.exclude_patterns):
-                    continue
+            for parameter in self.model.info.parameters.kernel_parameters+self.model.info.parameters.common_parameters:
+                # this is not necessary anymore since we're restricting to kernel and common parameters
+                # # Skip parameters matching exclusion patterns 
+                # if any(re.match(pattern, param) for pattern in self.exclude_patterns):
+                #     continue
                 
                 # Add the parameter layout for the current parameter
-                param_layout = self.create_log_slider_and_input(param, default_value)
+                param_layout = self.create_parameter_input_element(parameter)
                 self.control_layout.addRow(param_layout)
 
-                # Check if the current parameter is "radius" and, if so, add "radius_pd" with a default value if it exists
-                # if param.endswith("radius"):
-                if param in self.model.info.parameters.pd_1d: # polydisperse parameters
-                    new_param = param + "_pd"
-                    radius_pd_default = self.model_parameters.get(new_param, 0.1)  # Set to 0.1 or any fallback default
-                    radius_pd_layout = self.create_log_slider_and_input(new_param, radius_pd_default)
+                # Check if the current parameter is a polydisperse parameter and, if so, add the relevant polydisperse choices
+                if parameter.name in self.model.info.parameters.pd_1d: # polydisperse parameters
+                    new_param = sasmodels.modelinfo.Parameter(
+                        parameter.name + "_pd",
+                        units='',
+                        default=0.1,
+                        limits=(0, 1),
+                        description=f'relative polydispersity of parameter {parameter.name}',
+                    )
+                    radius_pd_layout = self.create_parameter_input_element(new_param)
                     self.control_layout.addRow(radius_pd_layout)
 
             # Initial plot
