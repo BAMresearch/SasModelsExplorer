@@ -159,16 +159,17 @@ class SasModelApp(QMainWindow):
 
         label = QLabel(parameter.name)
         label.setToolTip(parameter.description)
-        label.setFixedWidth(60)
+        label.setFixedWidth(100)
 
         if len(parameter.choices)>0: # create a pulldown menu with the choices
             adjustment_elements = self.create_pulldown_menu_elements(parameter)
             self.parameter_choosers[parameter.name] = adjustment_elements[0]
         else: # create a log slider adhering to the limits if not -inf, inf
             adjustment_elements = self.create_log_slider_and_input_elements(parameter)
-            self.parameter_sliders.append(adjustment_elements[0])
-            self.parameter_inputs.append(adjustment_elements[1])
+            self.parameter_sliders[parameter.name] = adjustment_elements[0]
+            self.parameter_inputs[parameter.name] = adjustment_elements[1]
         
+        param_layout.addWidget(label)
         for element in adjustment_elements:
             param_layout.addWidget(element)
         
@@ -182,7 +183,7 @@ class SasModelApp(QMainWindow):
 
         # Create a linked input box to display the current value of the parameter
         input_box = QLineEdit()
-        input_box.setFixedWidth(50)
+        input_box.setFixedWidth(100)
         input_box.setText(str(parameter.value))
         return [pulldown, input_box]
 
@@ -190,13 +191,14 @@ class SasModelApp(QMainWindow):
         """create a log-slider, input box and units text, return a three-elememnt list, total width = 500"""
         # Create a logarithmic slider for adjusting values
         slider = QSlider(Qt.Horizontal)
-        slider.setMinimum(0)
-        slider.setMaximum(1000)
+        slider.setFixedWidth(150)
+        slider.setMinimum(0) #, np.max(0, parameter.limits[0]))
+        slider.setMaximum(1000) #, np.min(1000, parameter.limits[1]))
         slider.setValue(self.value_to_log_slider(parameter.default))
         slider.valueChanged.connect(lambda: self.update_input_box(parameter.name))
         
         # Create an input box for exact value input
-        input_box = QLineEdit(str(default_value))
+        input_box = QLineEdit(str(parameter.default))
         input_box.setFixedWidth(60)
         input_box.editingFinished.connect(lambda: self.update_slider(parameter.name))
 
