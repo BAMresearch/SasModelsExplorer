@@ -1,2 +1,4 @@
 /.DS_Store
 /.venv
+*.pyc
+src/ModelExplorer/__pycache__/modelexplorer.cpython-312.pyc
