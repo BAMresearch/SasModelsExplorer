@@ -180,12 +180,13 @@ class SasModelApp(QMainWindow):
         pulldown = QComboBox()
         for choice in parameter.choices:
             pulldown.addItem(choice)
+        pulldown.setFixedWidth(150)
 
-        # Create a linked input box to display the current value of the parameter
-        input_box = QLineEdit()
-        input_box.setFixedWidth(100)
-        input_box.setText(str(parameter.value))
-        return [pulldown, input_box]
+        # # Create a linked input box to display the current value of the parameter
+        # input_box = QLineEdit()
+        # input_box.setFixedWidth(100)
+        # input_box.setText(str(parameter.choices[parameter.default]))
+        return [pulldown]
 
     def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
         """create a log-slider, input box and units text, return a three-elememnt list, total width = 500"""
