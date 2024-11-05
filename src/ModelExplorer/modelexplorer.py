@@ -1,5 +1,5 @@
 import re
-from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
+from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox,
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
 from PyQt5.QtCore import Qt
 import sasmodels.core
@@ -14,10 +14,12 @@ class SasModelApp(QMainWindow):
     model = None
     model_info = None
     model_parameters = None
-    parameter_sliders = None
-    parameter_inputs = None
+    parameter_choosers = None # for pulldown box choices
+    parameter_sliders = None # for sliders
+    parameter_inputs = None # sliders have a linked text input box 
     # Pattern list to exclude specific parameters
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
+    pd_types = [None, 'uniform', 'rectangle', 'gaussian', 'lognormal', 'schultz', 'boltzmann']
     
     def __init__(self, modelName="sphere"):
         super().__init__()
@@ -34,25 +36,21 @@ class SasModelApp(QMainWindow):
         self.control_layout.addRow("Model:", self.model_input)
         self.model_input.returnPressed.connect(self.load_model_parameters)
 
-        # # Button to reload model based on input
-        # load_button = QPushButton("Load Model")
-        # load_button.clicked.connect(self.load_model_parameters)
-        # self.control_layout.addWidget(load_button)
-
         # Scroll area for parameters
         scroll_widget = QWidget()
         scroll_widget.setLayout(self.control_layout)
         scroll_area = QScrollArea()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(400)
+        scroll_area.setFixedWidth(500)
 
         # Placeholder for dynamically added sliders and input boxes
         self.parameter_sliders = {}
+        self.parameter_choosers = {}
         self.parameter_inputs = {}
 
         # Right layout for plot
-        self.figure, self.ax = plt.subplots(figsize=(5, 4))
+        self.figure, self.ax = plt.subplots(figsize=(6, 4))
         self.canvas = FigureCanvas(self.figure)
 
         # qmin and qmax inputs below the plot
@@ -111,33 +109,19 @@ class SasModelApp(QMainWindow):
             for i in reversed(range(layout.count())):
                 if i>=starting_index:
                     self.remove_layout_and_widgets(layout.itemAt(i))
-                    
-        # while layout.count() > starting_index:  # Start clearing after model_input
-        #     print('ping')
-        #     item = layout.takeAt(starting_index)  # Always take the second item since index 0 is preserved
-        #     print(item) # these are layout objects or widgets. if layout objects, go deeper
-        #     if isinstance(item, QHBoxLayout):
-        #         # hopefully we'll hit widgets at some point. 
-        #         self.remove_layout_and_widgets(item, starting_index=0)
-            
-        #     widget = item.widget()
-        #     if widget:
-        #         layout.removeWidget(widget)
-        #         # sip.delete(widget)
-        #         # widget.deleteLater()
-        #         widget.setParent(None)
-        #         widget = None
 
     def load_model_parameters(self):
         model_name = self.model_input.text()
         try:
             # Load model info from sasmodels
+            self.model = sasmodels.core.load_model(model_name)
             self.model_info = sasmodels.core.load_model_info(model_name)
             self.model_parameters = self.model_info.parameters.defaults.copy()
 
             self.remove_layout_and_widgets(self.control_layout, starting_index=2)
             # Reset the parameter-specific dictionaries to clear any previous model data
             self.parameter_sliders.clear()
+            self.parameter_choosers.clear()
             self.parameter_inputs.clear()
 
             # Dynamically add sliders and input boxes for each model parameter
@@ -151,7 +135,8 @@ class SasModelApp(QMainWindow):
                 self.control_layout.addRow(param_layout)
 
                 # Check if the current parameter is "radius" and, if so, add "radius_pd" with a default value if it exists
-                if param.endswith("radius"):
+                # if param.endswith("radius"):
+                if param in self.model.info.parameters.pd_1d: # polydisperse parameters
                     new_param = param + "_pd"
                     radius_pd_default = self.model_parameters.get(new_param, 0.1)  # Set to 0.1 or any fallback default
                     radius_pd_layout = self.create_log_slider_and_input(new_param, radius_pd_default)
@@ -162,6 +147,58 @@ class SasModelApp(QMainWindow):
         except Exception as e:
             print(f"Error loading model '{model_name}': {e}")
 
+    def create_parameter_input_element(self, parameter: sasmodels.modelinfo.Parameter):
+        assert isinstance(parameter, sasmodels.modelinfo.Parameter), 'parameter supplied to create_parameter must be a sasmodels parameter'
+        # depending on the parameter choices and limits, create a pulldown box or slider
+        param_layout = QHBoxLayout()
+
+        label = QLabel(parameter.name)
+        label.setToolTip(parameter.description)
+        label.setFixedWidth(60)
+
+        if len(parameter.choices)>0: # create a pulldown menu with the choices
+            adjustment_elements = self.create_pulldown_menu_elements(parameter)
+            self.parameter_choosers[parameter.name] = adjustment_elements[0]
+        else: # create a log slider adhering to the limits if not -inf, inf
+            adjustment_elements = self.create_log_slider_and_input_elements(parameter)
+            self.parameter_sliders.append(adjustment_elements[0])
+            self.parameter_inputs.append(adjustment_elements[1])
+        
+        for element in adjustment_elements:
+            param_layout.addWidget(element)
+        
+        return param_layout
+
+    def create_pulldown_menu_elements(self, parameter:sasmodels.modelinfo.Parameter):
+        """create a pulldown menu with the parameter choices, a linked input box, and return it as a two-element list, total width = 500"""
+        pulldown = QComboBox()
+        for choice in parameter.choices:
+            pulldown.addItem(choice)
+
+        # Create a linked input box to display the current value of the parameter
+        input_box = QLineEdit()
+        input_box.setFixedWidth(50)
+        input_box.setText(str(parameter.value))
+        return [pulldown, input_box]
+
+    def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
+        """create a log-slider, input box and units text, return a three-elememnt list, total width = 500"""
+        # Create a logarithmic slider for adjusting values
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(0)
+        slider.setMaximum(1000)
+        slider.setValue(self.value_to_log_slider(parameter.default))
+        slider.valueChanged.connect(lambda: self.update_input_box(parameter.name))
+        
+        # Create an input box for exact value input
+        input_box = QLineEdit(str(default_value))
+        input_box.setFixedWidth(60)
+        input_box.editingFinished.connect(lambda: self.update_slider(parameter.name))
+
+        #unit text
+        unit_text = QLabel(parameter.units)
+
+        return [slider, input_box, unit_text]
 
     def create_log_slider_and_input(self, param_name, default_value):
         # Horizontal layout for the parameter row
@@ -233,7 +270,7 @@ class SasModelApp(QMainWindow):
 
         # Ensure that "radius_pd" is included in the parameters if "radius" was present
         # find a parameter ending in radius, and add one tacking on _pd 
-        radius_params = [param for param in values.keys() if param.endswith('radius')]
+        radius_params = [param for param in values.keys() if param in self.model.info.parameters.pd_1d]
 
         # radius_params = [param for param in values.keys() if "radius" in param and not "_pd" in param]
         for param in radius_params:
@@ -260,8 +297,8 @@ class SasModelApp(QMainWindow):
         q = np.geomspace(qmin, qmax, 250)
 
         # Update the model parameters
-        # find names with radius in them
-        radius_params = [param for param in parameters if param.endswith('radius')]
+        # find names that are in the polydisperse parameter list
+        radius_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
 
         # radius_params = [param for param in parameters if "radius" in param and not "_pd" in param]
         for param in radius_params:
