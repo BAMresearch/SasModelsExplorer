@@ -1,3 +1,4 @@
+import logging
 import re
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox,
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
@@ -146,6 +147,16 @@ class SasModelApp(QMainWindow):
                     )
                     radius_pd_layout = self.create_parameter_input_element(new_param)
                     self.control_layout.addRow(radius_pd_layout)
+                    new_param = sasmodels.modelinfo.Parameter(
+                        parameter.name + "_pd_type",
+                        limits = [[self.pd_types]],
+                        units='',
+                        default=0,
+                        description=f'polydispersity distribution shape for parameter {parameter.name}',
+                    )
+                    new_param.choices = self.pd_types
+                    radius_pd_layout = self.create_parameter_input_element(new_param)
+                    self.control_layout.addRow(radius_pd_layout)
 
             # Initial plot
             self.update_plot()
@@ -154,6 +165,7 @@ class SasModelApp(QMainWindow):
 
     def create_parameter_input_element(self, parameter: sasmodels.modelinfo.Parameter):
         assert isinstance(parameter, sasmodels.modelinfo.Parameter), 'parameter supplied to create_parameter must be a sasmodels parameter'
+        logging.info(f"Creating parameter input element for {parameter}")
         # depending on the parameter choices and limits, create a pulldown box or slider
         param_layout = QHBoxLayout()
 
@@ -162,9 +174,11 @@ class SasModelApp(QMainWindow):
         label.setFixedWidth(100)
 
         if len(parameter.choices)>0: # create a pulldown menu with the choices
+            logging.info(f"Creating pulldown for parameter {parameter}")
             adjustment_elements = self.create_pulldown_menu_elements(parameter)
             self.parameter_choosers[parameter.name] = adjustment_elements[0]
         else: # create a log slider adhering to the limits if not -inf, inf
+            logging.info(f"Creating slider for parameter {parameter}")
             adjustment_elements = self.create_log_slider_and_input_elements(parameter)
             self.parameter_sliders[parameter.name] = adjustment_elements[0]
             self.parameter_inputs[parameter.name] = adjustment_elements[1]
@@ -182,10 +196,6 @@ class SasModelApp(QMainWindow):
             pulldown.addItem(choice)
         pulldown.setFixedWidth(150)
 
-        # # Create a linked input box to display the current value of the parameter
-        # input_box = QLineEdit()
-        # input_box.setFixedWidth(100)
-        # input_box.setText(str(parameter.choices[parameter.default]))
         return [pulldown]
 
     def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
@@ -207,48 +217,25 @@ class SasModelApp(QMainWindow):
         unit_text = QLabel(parameter.units)
 
         return [slider, input_box, unit_text]
-
-    def create_log_slider_and_input(self, param_name, default_value):
-        # Horizontal layout for the parameter row
-        param_layout = QHBoxLayout()
-
-        # Create the label
-        label = QLabel(param_name)
-        
-        # Create a logarithmic slider for adjusting values
-        slider = QSlider(Qt.Horizontal)
-        slider.setMinimum(0)
-        slider.setMaximum(1000)
-        slider.setValue(self.value_to_log_slider(default_value))
-        slider.valueChanged.connect(lambda: self.update_input_box(param_name))
-        
-        # Create an input box for exact value input
-        input_box = QLineEdit(str(default_value))
-        input_box.setFixedWidth(60)
-        input_box.editingFinished.connect(lambda: self.update_slider(param_name))
-
-        # Store slider and input box for later access
-        self.parameter_sliders[param_name] = slider
-        self.parameter_inputs[param_name] = input_box
-
-        # Add widgets to the horizontal layout
-        param_layout.addWidget(label)
-        param_layout.addWidget(slider)
-        param_layout.addWidget(input_box)
-
-        return param_layout
+    
 
     def value_to_log_slider(self, value):
         """Convert a parameter value to a log slider position."""
         # Adjust range if necessary
         min_val, max_val = 1e-6, 1e3
-        log_pos = int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
+        if value == 0:
+            log_pos = 0
+        else:
+            log_pos = int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
         return log_pos
 
     def log_slider_to_value(self, slider_pos):
         """Convert a log slider position back to a parameter value."""
         min_val, max_val = 1e-6, 1e3
-        value = 10 ** (np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val)))
+        if slider_pos == 0:
+            value = 0
+        else:
+            value = 10 ** (np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val)))
         return value
 
     def update_input_box(self, param_name):
