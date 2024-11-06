@@ -27,7 +27,7 @@ class SasModelApp(QMainWindow):
     # Pattern list to exclude specific parameters
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
-    q_units = ['1/nm', '1/Ångström']
+    q_units = ['1/nm', '1/Ångström', '1/m']
     i_units = ['1/(m sr)', '1/(cm sr)']
     
     def __init__(self, modelName="sphere"):
