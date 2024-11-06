@@ -9,7 +9,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 # import sip
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-
+import pint
+ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
+ureg.define(r"percent = 0.01 = %")
+ureg.define(r"Ångström = 1e-10*m = Å = Ang")
+ureg.define(r"item = 1")
 
 class SasModelApp(QMainWindow):
     model = None
@@ -22,6 +26,7 @@ class SasModelApp(QMainWindow):
     # Pattern list to exclude specific parameters
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
+    q_units = ['1/nm', '1/Ångström']
     
     def __init__(self, modelName="sphere"):
         super().__init__()
