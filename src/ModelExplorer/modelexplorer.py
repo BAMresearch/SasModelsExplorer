@@ -35,6 +35,7 @@ class SasModelApp(QMainWindow):
 
         # Text input for model
         self.model_input = QLineEdit(modelName)
+        self.model_input.setFixedWidth(300)
         self.control_layout.addRow("Model:", self.model_input)
         self.model_input.returnPressed.connect(self.load_model_parameters)
 
@@ -44,7 +45,7 @@ class SasModelApp(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(450)
+        scroll_area.setFixedWidth(460)
 
         # Placeholder for dynamically added sliders and input boxes
         self.parameter_sliders = {}
