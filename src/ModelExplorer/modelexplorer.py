@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import List
 from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox,
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
 from PyQt5.QtCore import Qt
@@ -12,7 +13,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import pint
 ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
 ureg.define(r"percent = 0.01 = %")
-ureg.define(r"Ångström = 1e-10*m = Å = Ang")
+ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
 
 class SasModelApp(QMainWindow):
@@ -27,6 +28,7 @@ class SasModelApp(QMainWindow):
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
     q_units = ['1/nm', '1/Ångström']
+    i_units = ['1/(m sr)', '1/(cm sr)']
     
     def __init__(self, modelName="sphere"):
         super().__init__()
@@ -68,11 +70,13 @@ class SasModelApp(QMainWindow):
         self.q_max_input.setFixedWidth(80)
         self.q_min_input.editingFinished.connect(self.update_plot)
         self.q_max_input.editingFinished.connect(self.update_plot)
+        self.q_unit_input = self.create_pulldown_menu_elements(self.q_units)[0]
 
         # Layout for q range inputs
         q_range_layout = QHBoxLayout()
         q_range_layout.addWidget(QLabel("Q Min:"))
         q_range_layout.addWidget(self.q_min_input)
+        q_range_layout.addWidget(self.q_unit_input)
         q_range_layout.addWidget(QLabel("Q Max:"))
         q_range_layout.addWidget(self.q_max_input)
 
@@ -183,7 +187,7 @@ class SasModelApp(QMainWindow):
 
         if len(parameter.choices)>0: # create a pulldown menu with the choices
             logging.debug(f"Creating pulldown for parameter {parameter}")
-            adjustment_elements = self.create_pulldown_menu_elements(parameter)
+            adjustment_elements = self.create_pulldown_menu_elements(parameter.choices)
             self.parameter_choosers[parameter.name] = adjustment_elements[0]
         else: # create a log slider adhering to the limits if not -inf, inf
             logging.debug(f"Creating slider for parameter {parameter}")
@@ -197,10 +201,10 @@ class SasModelApp(QMainWindow):
         
         return param_layout
 
-    def create_pulldown_menu_elements(self, parameter:sasmodels.modelinfo.Parameter):
+    def create_pulldown_menu_elements(self, choices:List):
         """create a pulldown menu with the parameter choices, a linked input box, and return it as a two-element list, total width = 500"""
         pulldown = QComboBox()
-        for choice in parameter.choices:
+        for choice in choices:
             pulldown.addItem(choice)
         pulldown.setFixedWidth(150)
         pulldown.currentIndexChanged.connect(lambda: self.update_plot())
@@ -313,13 +317,15 @@ class SasModelApp(QMainWindow):
         # retrieve values from pulldown boxes
         parameters.update(self.get_pulldown_values())
 
-        # Retrieve and validate q range
+        # Retrieve and validate q range and units
         try:
             qmin = float(self.q_min_input.text())
             qmax = float(self.q_max_input.text())
+            qunit = self.q_unit_input.currentText()
         except ValueError:
             qmin, qmax = 0.01, 1.0  # Default values in case of error
-
+            qunit = '1/nm'
+        
         # Prepare parameters for sasmodel
         q = np.geomspace(qmin, qmax, 250)
 
@@ -334,7 +340,7 @@ class SasModelApp(QMainWindow):
 
         # Compute intensity
         model = sasmodels.core.load_model(self.model_input.text())
-        kernel = model.make_kernel([q])
+        kernel = model.make_kernel([q * ureg.Quantity(1, qunit).to('1/Ang').magnitude])
         logging.info(f'calling sasmodels with {[{p: v} for p, v in parameters.items()]}')
         intensity = sasmodels.direct_model.call_kernel(kernel, parameters)
 
@@ -342,7 +348,7 @@ class SasModelApp(QMainWindow):
         self.ax.plot(q, intensity*100., '-')
         self.ax.set_xscale("log")
         self.ax.set_yscale("log")
-        self.ax.set_xlabel("q (1/Ångström)")
+        self.ax.set_xlabel(f"q ({qunit})")
         self.ax.set_ylabel("I (1/(m sr))")
 
         # Refresh the canvas
