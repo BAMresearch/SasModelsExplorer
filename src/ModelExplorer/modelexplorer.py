@@ -44,7 +44,7 @@ class SasModelApp(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(500)
+        scroll_area.setFixedWidth(450)
 
         # Placeholder for dynamically added sliders and input boxes
         self.parameter_sliders = {}
@@ -212,7 +212,7 @@ class SasModelApp(QMainWindow):
         
         # Create an input box for exact value input
         input_box = QLineEdit(str(parameter.default))
-        input_box.setFixedWidth(60)
+        input_box.setFixedWidth(80)
         input_box.editingFinished.connect(lambda: self.update_slider(parameter.name))
 
         #unit text
@@ -277,11 +277,9 @@ class SasModelApp(QMainWindow):
         values = {param: self.log_slider_to_value(slider.value(), self.parameters[param]) for param, slider in self.parameter_sliders.items()}
 
         # Ensure that "radius_pd" is included in the parameters if "radius" was present
-        # find a parameter ending in radius, and add one tacking on _pd 
-        radius_params = [param for param in values.keys() if param in self.model.info.parameters.pd_1d]
+        pd_params = [param for param in values.keys() if param in self.model.info.parameters.pd_1d]
 
-        # radius_params = [param for param in values.keys() if "radius" in param and not "_pd" in param]
-        for param in radius_params:
+        for param in pd_params:
             # for each parameter, add a _pd_type and a _pd_n
             pname = param + "_pd"
             values[param + "_pd"] = self.log_slider_to_value(self.parameter_sliders[pname].value(), self.parameters[pname])
@@ -321,21 +319,12 @@ class SasModelApp(QMainWindow):
 
         # Update the model parameters
         # find names that are in the polydisperse parameter list
-        radius_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
+        pd_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
 
-        # radius_params = [param for param in parameters if "radius" in param and not "_pd" in param]
-        for param in radius_params:
+        for param in pd_params:
             # for each parameter, add a _pd_type and a _pd_n
-            pd_type = param + "_pd_type"
             pd_n = param + "_pd_n"
-            logging.info(f'{parameters[pd_type]=}')
-            # parameters[pd_type] = "gaussian"
             parameters[pd_n] = 35
-
-        # parameters.update({
-        #     'scale': parameters.get('scale', 1.0),
-        #     'background': parameters.get('background', 0.001),
-        # })
 
         # Compute intensity
         model = sasmodels.core.load_model(self.model_input.text())
@@ -344,10 +333,10 @@ class SasModelApp(QMainWindow):
         intensity = sasmodels.direct_model.call_kernel(kernel, parameters)
 
         # Plot
-        self.ax.plot(q/10., intensity*100., '-')
+        self.ax.plot(q, intensity*100., '-')
         self.ax.set_xscale("log")
         self.ax.set_yscale("log")
-        self.ax.set_xlabel("q (1/nm)")
+        self.ax.set_xlabel("q (1/Ångström)")
         self.ax.set_ylabel("I (1/(m sr))")
 
         # Refresh the canvas
