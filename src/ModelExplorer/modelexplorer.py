@@ -1,8 +1,11 @@
+# src/ModelExplorer/modelexplorer.py
+
 import logging
 import re
 from typing import List
-from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox,
+from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox, QCheckBox,
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
+# from PyQt5.QtWidgets import QBoxLayout
 from PyQt5.QtCore import Qt
 import sasmodels.core
 import sasmodels.direct_model
@@ -24,6 +27,7 @@ class SasModelApp(QMainWindow):
     parameter_choosers = None # for pulldown box choices
     parameter_sliders = None # for sliders
     parameter_inputs = None # sliders have a linked text input box 
+    parameter_checkboxes = None # checkboxes for future fitting
     # Pattern list to exclude specific parameters
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
@@ -52,12 +56,13 @@ class SasModelApp(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(460)
+        scroll_area.setFixedWidth(450)
 
         # Placeholder for dynamically added sliders and input boxes
         self.parameter_sliders = {}
         self.parameter_choosers = {}
         self.parameter_inputs = {}
+        self.parameter_checkboxes = {}
 
         # Right layout for plot
         self.figure, self.ax = plt.subplots(figsize=(6, 4))
@@ -116,7 +121,7 @@ class SasModelApp(QMainWindow):
         if widget:
             widget.deleteLater()
             widget=None
-            # widget.setParent(None)
+
         elif layout:
             for i in reversed(range(layout.count())):
                 if i>=starting_index:
@@ -135,6 +140,7 @@ class SasModelApp(QMainWindow):
             self.parameter_sliders.clear()
             self.parameter_choosers.clear()
             self.parameter_inputs.clear()
+            self.parameter_checkboxes.clear()
             self.parameters.clear()
 
             # Dynamically add sliders and input boxes for each model parameter
@@ -228,7 +234,13 @@ class SasModelApp(QMainWindow):
         #unit text
         unit_text = QLabel(parameter.units)
 
-        return [slider, input_box, unit_text]
+        # Checkbox for parameter fit
+        # fit_checkbox = QCheckBox("Fit")
+        # fit_checkbox.setChecked(False)
+        # fit_checkbox.stateChanged.connect(self.update_plot)
+        # self.parameter_checkboxes[parameter.name] = fit_checkbox
+
+        return [slider, input_box, unit_text] #, fit_checkbox]
     
 
     def value_to_log_slider(self, value, parameter:sasmodels.modelinfo.Parameter=None):
