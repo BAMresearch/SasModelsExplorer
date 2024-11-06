@@ -15,12 +15,13 @@ class SasModelApp(QMainWindow):
     model = None
     model_info = None
     model_parameters = None
+    parameters = dict() # the actual parameter object references in the UI
     parameter_choosers = None # for pulldown box choices
     parameter_sliders = None # for sliders
     parameter_inputs = None # sliders have a linked text input box 
     # Pattern list to exclude specific parameters
     exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
-    pd_types = [None, 'uniform', 'rectangle', 'gaussian', 'lognormal', 'schultz', 'boltzmann']
+    pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
     
     def __init__(self, modelName="sphere"):
         super().__init__()
@@ -124,14 +125,11 @@ class SasModelApp(QMainWindow):
             self.parameter_sliders.clear()
             self.parameter_choosers.clear()
             self.parameter_inputs.clear()
+            self.parameters.clear()
 
             # Dynamically add sliders and input boxes for each model parameter
-            for parameter in self.model.info.parameters.kernel_parameters+self.model.info.parameters.common_parameters:
-                # this is not necessary anymore since we're restricting to kernel and common parameters
-                # # Skip parameters matching exclusion patterns 
-                # if any(re.match(pattern, param) for pattern in self.exclude_patterns):
-                #     continue
-                
+            for parameter in self.model.info.parameters.common_parameters+self.model.info.parameters.kernel_parameters:
+                self.parameters[parameter.name] = parameter
                 # Add the parameter layout for the current parameter
                 param_layout = self.create_parameter_input_element(parameter)
                 self.control_layout.addRow(param_layout)
@@ -141,23 +139,27 @@ class SasModelApp(QMainWindow):
                     new_param = sasmodels.modelinfo.Parameter(
                         parameter.name + "_pd",
                         units='',
-                        default=0.1,
+                        default=0,
                         limits=(0, 1),
                         description=f'relative polydispersity of parameter {parameter.name}',
                     )
                     radius_pd_layout = self.create_parameter_input_element(new_param)
                     self.control_layout.addRow(radius_pd_layout)
+                    self.parameters[new_param.name] = new_param
                     new_param = sasmodels.modelinfo.Parameter(
                         parameter.name + "_pd_type",
                         limits = [[self.pd_types]],
                         units='',
-                        default=0,
+                        default='gaussian',
                         description=f'polydispersity distribution shape for parameter {parameter.name}',
                     )
                     new_param.choices = self.pd_types
                     radius_pd_layout = self.create_parameter_input_element(new_param)
                     self.control_layout.addRow(radius_pd_layout)
+                    self.parameters[new_param.name] = new_param
 
+
+            logging.info(f'parameters listed in self.parameters: {self.parameters.keys()}')
             # Initial plot
             self.update_plot()
         except Exception as e:
@@ -174,11 +176,11 @@ class SasModelApp(QMainWindow):
         label.setFixedWidth(100)
 
         if len(parameter.choices)>0: # create a pulldown menu with the choices
-            logging.info(f"Creating pulldown for parameter {parameter}")
+            logging.debug(f"Creating pulldown for parameter {parameter}")
             adjustment_elements = self.create_pulldown_menu_elements(parameter)
             self.parameter_choosers[parameter.name] = adjustment_elements[0]
         else: # create a log slider adhering to the limits if not -inf, inf
-            logging.info(f"Creating slider for parameter {parameter}")
+            logging.debug(f"Creating slider for parameter {parameter}")
             adjustment_elements = self.create_log_slider_and_input_elements(parameter)
             self.parameter_sliders[parameter.name] = adjustment_elements[0]
             self.parameter_inputs[parameter.name] = adjustment_elements[1]
@@ -195,7 +197,7 @@ class SasModelApp(QMainWindow):
         for choice in parameter.choices:
             pulldown.addItem(choice)
         pulldown.setFixedWidth(150)
-
+        pulldown.currentIndexChanged.connect(lambda: self.update_plot())
         return [pulldown]
 
     def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
@@ -205,7 +207,7 @@ class SasModelApp(QMainWindow):
         slider.setFixedWidth(150)
         slider.setMinimum(0) #, np.max(0, parameter.limits[0]))
         slider.setMaximum(1000) #, np.min(1000, parameter.limits[1]))
-        slider.setValue(self.value_to_log_slider(parameter.default))
+        slider.setValue(self.value_to_log_slider(parameter.default, parameter))
         slider.valueChanged.connect(lambda: self.update_input_box(parameter.name))
         
         # Create an input box for exact value input
@@ -219,19 +221,30 @@ class SasModelApp(QMainWindow):
         return [slider, input_box, unit_text]
     
 
-    def value_to_log_slider(self, value):
+    def value_to_log_slider(self, value, parameter:sasmodels.modelinfo.Parameter=None):
         """Convert a parameter value to a log slider position."""
         # Adjust range if necessary
         min_val, max_val = 1e-6, 1e3
+        if parameter is not None:
+            min_val = np.maximum(min_val, parameter.limits[0])
+            max_val = np.minimum(parameter.limits[1], max_val)
+        logging.debug('value_to_log_slider: %s', (min_val, max_val))
+
         if value == 0:
             log_pos = 0
         else:
             log_pos = int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
         return log_pos
 
-    def log_slider_to_value(self, slider_pos):
+    def log_slider_to_value(self, slider_pos, parameter:sasmodels.modelinfo.Parameter=None):
         """Convert a log slider position back to a parameter value."""
         min_val, max_val = 1e-6, 1e3
+        # Adjust range if necessary
+        if parameter is not None:
+            min_val = np.maximum(min_val, parameter.limits[0])
+            max_val = np.minimum(parameter.limits[1], max_val)
+        logging.debug('log_slider_to_value: %s', (min_val, max_val))
+
         if slider_pos == 0:
             value = 0
         else:
@@ -241,7 +254,7 @@ class SasModelApp(QMainWindow):
     def update_input_box(self, param_name):
         # Get the slider value, convert it back to the original scale, and update the input box
         slider = self.parameter_sliders[param_name]
-        value = self.log_slider_to_value(slider.value())
+        value = self.log_slider_to_value(slider.value(), parameter=self.parameters[param_name])
         input_box = self.parameter_inputs[param_name]
         input_box.setText(f"{value:.6f}")
         self.update_plot()
@@ -252,16 +265,16 @@ class SasModelApp(QMainWindow):
         try:
             value = float(input_box.text())
             slider = self.parameter_sliders[param_name]
-            slider.setValue(self.value_to_log_slider(value))
+            slider.setValue(self.value_to_log_slider(value, self.parameters[param_name]))
             self.update_plot()
         except ValueError:
             # Reset input box to slider value if the input is invalid
             slider = self.parameter_sliders[param_name]
-            input_box.setText(f"{self.log_slider_to_value(slider.value()):.6f}")
+            input_box.setText(f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}")
 
     def get_slider_values(self):
         # Retrieve values from sliders, adjusting them back to the parameter scale
-        values = {param: self.log_slider_to_value(slider.value()) for param, slider in self.parameter_sliders.items()}
+        values = {param: self.log_slider_to_value(slider.value(), self.parameters[param]) for param, slider in self.parameter_sliders.items()}
 
         # Ensure that "radius_pd" is included in the parameters if "radius" was present
         # find a parameter ending in radius, and add one tacking on _pd 
@@ -270,16 +283,31 @@ class SasModelApp(QMainWindow):
         # radius_params = [param for param in values.keys() if "radius" in param and not "_pd" in param]
         for param in radius_params:
             # for each parameter, add a _pd_type and a _pd_n
-            values[param + "_pd"] = self.log_slider_to_value(self.parameter_sliders[param + "_pd"].value())
+            pname = param + "_pd"
+            values[param + "_pd"] = self.log_slider_to_value(self.parameter_sliders[pname].value(), self.parameters[pname])
 
         return values
     
+    def get_pulldown_values(self):
+        # Retrieve values from pulldowns, adjusting them back to the parameter scale
+        values = {}
+        for param, chooser in self.parameter_choosers.items():
+            parameter = self.parameters[param]
+            if "_pd_type" in parameter.name:
+                values[param] = parameter.choices[chooser.currentIndex()]
+            else:
+                values[param] = chooser.currentIndex()
+
+        return values
+
     def update_plot(self):
         # Clear the current plot
         self.ax.clear()
 
         # Get values from sliders
         parameters = self.get_slider_values()
+        # retrieve values from pulldown boxes
+        parameters.update(self.get_pulldown_values())
 
         # Retrieve and validate q range
         try:
@@ -300,21 +328,23 @@ class SasModelApp(QMainWindow):
             # for each parameter, add a _pd_type and a _pd_n
             pd_type = param + "_pd_type"
             pd_n = param + "_pd_n"
-            parameters[pd_type] = "gaussian"
+            logging.info(f'{parameters[pd_type]=}')
+            # parameters[pd_type] = "gaussian"
             parameters[pd_n] = 35
 
-        parameters.update({
-            'scale': parameters.get('scale', 1.0),
-            'background': parameters.get('background', 0.001),
-        })
+        # parameters.update({
+        #     'scale': parameters.get('scale', 1.0),
+        #     'background': parameters.get('background', 0.001),
+        # })
 
         # Compute intensity
         model = sasmodels.core.load_model(self.model_input.text())
         kernel = model.make_kernel([q])
+        logging.info(f'calling sasmodels with {[{p: v} for p, v in parameters.items()]}')
         intensity = sasmodels.direct_model.call_kernel(kernel, parameters)
 
         # Plot
-        self.ax.plot(q, intensity, '-')
+        self.ax.plot(q/10., intensity*100., '-')
         self.ax.set_xscale("log")
         self.ax.set_yscale("log")
         self.ax.set_xlabel("q (1/nm)")
