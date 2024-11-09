@@ -20,7 +20,9 @@ ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
 
 class SasModelApp(QMainWindow):
+    q = None
     model = None
+    kernel = None
     model_info = None
     model_parameters = None
     parameters = dict() # the actual parameter object references in the UI
@@ -33,6 +35,7 @@ class SasModelApp(QMainWindow):
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
     q_units = ['1/nm', '1/Ångström', '1/m']
     i_units = ['1/(m sr)', '1/(cm sr)']
+    qunit = None
     
     def __init__(self, modelName="sphere"):
         super().__init__()
@@ -73,9 +76,9 @@ class SasModelApp(QMainWindow):
         self.q_max_input = QLineEdit("1.0")
         self.q_min_input.setFixedWidth(80)
         self.q_max_input.setFixedWidth(80)
-        self.q_min_input.editingFinished.connect(self.update_plot)
-        self.q_max_input.editingFinished.connect(self.update_plot)
-        self.q_unit_input = self.create_pulldown_menu_elements(self.q_units)[0]
+        self.q_min_input.editingFinished.connect(self.update_kernel_and_plot)
+        self.q_max_input.editingFinished.connect(self.update_kernel_and_plot)
+        self.q_unit_input = self.create_pulldown_menu_elements(self.q_units, connected_function=self.update_kernel_and_plot)[0]
 
         # Layout for q range inputs
         q_range_layout = QHBoxLayout()
@@ -177,7 +180,8 @@ class SasModelApp(QMainWindow):
 
             logging.info(f'parameters listed in self.parameters: {self.parameters.keys()}')
             # Initial plot
-            self.update_plot()
+            self.update_model_and_plot()
+
         except Exception as e:
             print(f"Error loading model '{model_name}': {e}")
 
@@ -207,13 +211,16 @@ class SasModelApp(QMainWindow):
         
         return param_layout
 
-    def create_pulldown_menu_elements(self, choices:List):
+    def create_pulldown_menu_elements(self, choices:List, connected_function=None):
         """create a pulldown menu with the parameter choices, a linked input box, and return it as a two-element list, total width = 500"""
         pulldown = QComboBox()
         for choice in choices:
             pulldown.addItem(choice)
         pulldown.setFixedWidth(150)
-        pulldown.currentIndexChanged.connect(lambda: self.update_plot())
+        if connected_function is None:
+            pulldown.currentIndexChanged.connect(lambda: self.update_plot())
+        else: 
+            pulldown.currentIndexChanged.connect(lambda: connected_function())
         return [pulldown]
 
     def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
@@ -320,16 +327,15 @@ class SasModelApp(QMainWindow):
 
         return values
 
-    def update_plot(self):
-        # Clear the current plot
-        self.ax.clear()
+    def update_model_and_plot(self):
+        # Update the model and kernel, then plot the results
+        logging.info(f'loading model {self.model_input.text()}')
+        self.model = sasmodels.core.load_model(self.model_input.text())
+        self.update_kernel_and_plot()
 
-        # Get values from sliders
-        parameters = self.get_slider_values()
-        # retrieve values from pulldown boxes
-        parameters.update(self.get_pulldown_values())
-
+    def update_kernel_and_plot(self):
         # Retrieve and validate q range and units
+        logging.info(f'updating kernel')
         try:
             qmin = float(self.q_min_input.text())
             qmax = float(self.q_max_input.text())
@@ -339,7 +345,20 @@ class SasModelApp(QMainWindow):
             qunit = '1/nm'
         
         # Prepare parameters for sasmodel
-        q = np.geomspace(qmin, qmax, 250)
+        self.q = np.geomspace(qmin, qmax, 250)
+        self.qunit = qunit
+        self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to('1/Ang').magnitude])
+        self.update_plot()
+
+    def update_plot(self):
+        # Clear the current plot
+        logging.info(f'updating plot')
+        self.ax.clear()
+
+        # Get values from sliders
+        parameters = self.get_slider_values()
+        # retrieve values from pulldown boxes
+        parameters.update(self.get_pulldown_values())
 
         # Update the model parameters
         # find names that are in the polydisperse parameter list
@@ -351,8 +370,10 @@ class SasModelApp(QMainWindow):
             parameters[pd_n] = 35
 
         # Compute intensity
-        model = sasmodels.core.load_model(self.model_input.text())
-        kernel = model.make_kernel([q * ureg.Quantity(1, qunit).to('1/Ang').magnitude])
+        q=self.q
+        qunit=self.qunit
+        # model = self.model
+        kernel = self.kernel
         logging.info(f'calling sasmodels with {[{p: v} for p, v in parameters.items()]}')
         intensity = sasmodels.direct_model.call_kernel(kernel, parameters)
 
