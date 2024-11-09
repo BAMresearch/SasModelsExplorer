@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import List
-from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox, QCheckBox,
+from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QComboBox, QCheckBox, QMessageBox,
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
 # from PyQt5.QtWidgets import QBoxLayout
 from PyQt5.QtCore import Qt
@@ -19,6 +19,7 @@ ureg.define(r"percent = 0.01 = %")
 ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
 
+
 class SasModelApp(QMainWindow):
     q = None
     model = None
@@ -31,15 +32,18 @@ class SasModelApp(QMainWindow):
     parameter_inputs = None # sliders have a linked text input box 
     parameter_checkboxes = None # checkboxes for future fitting
     # Pattern list to exclude specific parameters
-    exclude_patterns = [r'up_.*', r'.*_M0', r'.*_mtheta', r'.*_mphi']
     pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
     q_units = ['1/nm', '1/Ångström', '1/m']
     i_units = ['1/(m sr)', '1/(cm sr)']
     qunit = None
+    infoText = None
     
     def __init__(self, modelName="sphere"):
         super().__init__()
         self.setWindowTitle("SasModels Interactive App")
+        
+        # generate the infoText:
+        self.infoText = self.generate_infotext()
 
         # Main layout
         main_layout = QHBoxLayout()
@@ -106,6 +110,47 @@ class SasModelApp(QMainWindow):
         self.model_info = None
         self.model_parameters = {}
         self.load_model_parameters()
+
+
+    def generate_infotext(self):
+
+        def list_to_two_column_string(ListOfStrings:List[str]):
+            maxWidth = 0
+            for line in ListOfStrings:
+                maxWidth = max(maxWidth, len(line)+2)
+            maxWidth
+
+            twoColumnModels = []
+            halfcut = int(np.ceil(len(ListOfStrings) / 2))
+            while len(ListOfStrings) % 2 != 0: # odd number of lines
+                # add a blank line to the end to prevent indexing beyond list
+                ListOfStrings += ['']
+            
+            for rowi in range(halfcut):
+                twoColumnModels.append(ListOfStrings[rowi] + ' ' * (maxWidth - len(ListOfStrings[rowi])) + ListOfStrings[halfcut + rowi])
+
+            # add it all together
+            return twoColumnModels
+        
+        infoText = []
+
+        infoText += ["Available isotropic SasModel Models:"]
+        infoText += [" -- \n"]
+        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if not sasmodels.core.load_model_info(model).structure_factor and not sasmodels.core.load_model_info(model).parameters.has_2d]
+        infoText += list_to_two_column_string(modelList)
+
+        infoText += ["\nAvailable anisotropic SasModel Models:"]
+        infoText += [" -- \n"]
+        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if not sasmodels.core.load_model_info(model).structure_factor and sasmodels.core.load_model_info(model).parameters.has_2d]
+        infoText += list_to_two_column_string(modelList)
+
+        infoText += ["\nAvailable structure factors:"]
+        infoText += [" -- \n"]
+        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if sasmodels.core.load_model_info(model).structure_factor]
+        infoText += list_to_two_column_string(modelList)
+
+        return "\n".join(infoText)
+
 
     def remove_layout_and_widgets(self, item, starting_index:int=0):
         # Clear only parameter-specific widgets in the control layout
@@ -183,7 +228,16 @@ class SasModelApp(QMainWindow):
             self.update_model_and_plot()
 
         except Exception as e:
-            print(f"Error loading model '{model_name}': {e}")
+            logging.warning(f"Error loading model '{model_name}': {e}")
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Invalid model")
+            dialog.setText(f"Could not load model '{model_name}': {e}")
+            dialog.setIcon(QMessageBox.Warning)
+            dialog.setStandardButtons(QMessageBox.Help | QMessageBox.Ok)
+            dialog.setInformativeText(self.infoText)
+            button = dialog.exec()
+            # if button == QMessageBox.Help:
+            
 
     def create_parameter_input_element(self, parameter: sasmodels.modelinfo.Parameter):
         assert isinstance(parameter, sasmodels.modelinfo.Parameter), 'parameter supplied to create_parameter must be a sasmodels parameter'
@@ -330,7 +384,13 @@ class SasModelApp(QMainWindow):
     def update_model_and_plot(self):
         # Update the model and kernel, then plot the results
         logging.info(f'loading model {self.model_input.text()}')
+        # try:
         self.model = sasmodels.core.load_model(self.model_input.text())
+        # except Exception as e:
+        #     QDialog.QMessageBox.warning(
+        #         self, "Invalid model", f"Could not load model {e}"
+        #     )
+        #     return
         self.update_kernel_and_plot()
 
     def update_kernel_and_plot(self):
