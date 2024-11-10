@@ -7,18 +7,56 @@ from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QCo
                              QLabel, QLineEdit, QPushButton, QFormLayout, QSlider, QScrollArea)
 # from PyQt5.QtWidgets import QBoxLayout
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont, QFontDatabase
 import sasmodels.core
 import sasmodels.direct_model
 import numpy as np
 import matplotlib.pyplot as plt
 # import sip
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import collections
 import pint
 ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
 ureg.define(r"percent = 0.01 = %")
 ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
 
+
+def list_to_columnar_string(ListOfStrings:List[str], ncols:int=2, MinimumColumnWidth:int = 0, padding:str = "  ", ordering:str="columns"):
+    """
+    return a string representation of a list of strings. 
+    the strings are lined up in a number of columns, newspaper-style. 
+    Parameters are:
+    - ListOfStrings : a list of strings to be formatted.
+    - ncols : the number of columns to format them into.
+    - MinimumColumnWidth : the minimum width for each column. Will be expanded to fit the largest string
+    - padding : spacing string between columns
+    - ordering : 'columns' or 'rows'. If 'columns', then the content will appear in columns (like reading a newspaper), otherwise rows.
+    """
+
+    # only equal-width columns for now... set to the width of the largest single string    
+    maxWidth = MinimumColumnWidth
+    maxWidth = np.maximum(maxWidth, max([len(i) for i in ListOfStrings]))
+    # maxWidth += padding # pad a little extra
+
+    # find out where to cut the list into chunks
+    cut = int(np.ceil(len(ListOfStrings) / ncols))
+    # fill out the list so it is divisible by ncols, preventing indexing beyond list
+    while len(ListOfStrings) % ncols != 0: # odd number of lines
+        ListOfStrings += ['']
+    
+    # format each column
+    ColumnarLines = []    
+    for rowi in range(cut): 
+        if ordering == 'columns':
+            lineString = padding.join([ListOfStrings[rowi+coli*cut].ljust(maxWidth) for coli in range(ncols)])
+        else: 
+            lineString = padding.join([ListOfStrings[rowi*ncols+coli].ljust(maxWidth) for coli in range(ncols)])
+        
+        ColumnarLines.append(lineString + '\n')
+
+    # add it all together
+    return "".join(ColumnarLines)
 
 class SasModelApp(QMainWindow):
     q = None
@@ -113,43 +151,24 @@ class SasModelApp(QMainWindow):
 
 
     def generate_infotext(self):
-
-        def list_to_two_column_string(ListOfStrings:List[str]):
-            maxWidth = 0
-            for line in ListOfStrings:
-                maxWidth = max(maxWidth, len(line)+2)
-            maxWidth
-
-            twoColumnModels = []
-            halfcut = int(np.ceil(len(ListOfStrings) / 2))
-            while len(ListOfStrings) % 2 != 0: # odd number of lines
-                # add a blank line to the end to prevent indexing beyond list
-                ListOfStrings += ['']
-            
-            for rowi in range(halfcut):
-                twoColumnModels.append(ListOfStrings[rowi] + ' ' * (maxWidth - len(ListOfStrings[rowi])) + ListOfStrings[halfcut + rowi])
-
-            # add it all together
-            return twoColumnModels
+        """Generate the help text presented if an uninterpretable model is entered"""
+        ncols = 3 # Number of columns for the model listing.       
+        padding = "   " 
+        categories = [sasmodels.core.load_model_info(model).category for model in sasmodels.core.list_models()]
         
-        infoText = []
-
-        infoText += ["Available isotropic SasModel Models:"]
-        infoText += [" -- \n"]
-        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if not sasmodels.core.load_model_info(model).structure_factor and not sasmodels.core.load_model_info(model).parameters.has_2d]
-        infoText += list_to_two_column_string(modelList)
-
-        infoText += ["\nAvailable anisotropic SasModel Models:"]
-        infoText += [" -- \n"]
-        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if not sasmodels.core.load_model_info(model).structure_factor and sasmodels.core.load_model_info(model).parameters.has_2d]
-        infoText += list_to_two_column_string(modelList)
-
-        infoText += ["\nAvailable structure factors:"]
-        infoText += [" -- \n"]
-        modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if sasmodels.core.load_model_info(model).structure_factor]
-        infoText += list_to_two_column_string(modelList)
-
-        return "\n".join(infoText)
+        len([i for i in categories if i.startswith('shape:')])
+        len(categories)
+        groupings = [i.split(':')[0] for i in categories]
+        infoText = 'Sasmodels can be specified as one of the following. They can also be composed by multiplication/division or addition/subtraction.\n'
+        infoText += 'For example: "cylinder+sphere" will add these two models. A structure factor can be applied with the @-operator, e.g. "sphere@hardsphere".\n\n'
+        for cat in list(collections.Counter(groupings).keys()):
+            infoText += f"Available {cat} Models:\n"
+            infoText += " -- \n"
+            modelList = [sasmodels.core.load_model_info(model).id for model in sasmodels.core.list_models() if sasmodels.core.load_model_info(model).category.startswith(cat)]
+            infoText += list_to_columnar_string(modelList, ncols=ncols, padding = padding, ordering='cols')
+            
+        print(infoText)
+        return infoText
 
 
     def remove_layout_and_widgets(self, item, starting_index:int=0):
@@ -229,13 +248,27 @@ class SasModelApp(QMainWindow):
 
         except Exception as e:
             logging.warning(f"Error loading model '{model_name}': {e}")
+
+            # let's create a dialog box to inform the user of the error
+            # Create a custom font
+            # ---------------------
+            font = QFont()
+            font.setFamily("Courier")
+            font.setPointSize(9)
+
+
             dialog = QMessageBox(self)
             dialog.setWindowTitle("Invalid model")
             dialog.setText(f"Could not load model '{model_name}': {e}")
             dialog.setIcon(QMessageBox.Warning)
-            dialog.setStandardButtons(QMessageBox.Help | QMessageBox.Ok)
+            dialog.setStandardButtons(QMessageBox.Ok)
             dialog.setInformativeText(self.infoText)
+
             button = dialog.exec()
+            if button:
+                dialog.close()
+            else:
+                dialog.close()
             # if button == QMessageBox.Help:
             
 
