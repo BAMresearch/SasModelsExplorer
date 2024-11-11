@@ -20,7 +20,7 @@ Here's an updated `README.md` with a streamlined installation section referencin
 
 ## SasModels Explorer App
 
-A PyQt-based interactive application for exploring scattering models using `sasmodels`. This app offers a GUI with sliders, text boxes, and dropdowns for fine-tuning parameters, displaying real-time scattering intensity plots as parameters are adjusted.
+A PyQt-based interactive application for exploring scattering models using the `sasmodels` library. This app offers a GUI with sliders, text boxes, and dropdowns for fine-tuning parameters, displaying real-time scattering intensity plots as parameters are adjusted.
 
 ### Features
 - **Interactive Parameter Controls**: Adjust model parameters with sliders, text boxes, and dropdowns.
@@ -56,18 +56,7 @@ Dependencies are managed in `requirements.txt`, and include:
 #### Running the GUI
 To launch the GUI, execute:
 ```bash
-python /path/to/SasModelsExplorer/src/ModelExplorer -v sphere@hardsphere
-```
-
-#### Command-Line Interface (CLI)
-The CLI, available via `__main__.py`, allows running specific models and adjusting parameters directly from the command line. Basic usage:
-```bash
-python -m sasmodels_app <model_name> [options]
-```
-
-For help with available commands:
-```bash
-python -m sasmodels_app --help
+python /path/to/SasModelsExplorer/ModelExplorer -v sphere@hardsphere
 ```
 
 ### Using the GUI
@@ -102,12 +91,19 @@ Try these models to get started:
 - `"sphere@hardsphere"`: sphere model with a hard-shell structure factor.
 - `"sphere@hardsphere+porod"`: sphere model with a hard-shell structure factor and additional Porod slope.
 
-The entire sasmodels library is available, which you can combine, multiply, subtract with the syntax alluded to above...
+The entire sasmodels library is available, which you can combine, multiply, subtract with the syntax alluded to above... A help text with the available models is displayed when a nonexistent model is entered.
 
 ### Logging and Debugging
 The application uses `logging` for tracking parameter changes:
 - Logs are printed in the console to show current parameter values.
 - To enable detailed logs, set the logging level to `DEBUG` in the code or use the -vv option at the CLI. 
+
+### Current issues
+Also check the "issues" in the Github repository.
+- The app currently does not display 2D scattering models. They will probably not be fast enough to be fun anyway
+- There is an issue clearing the parameters when entering a new model, causing the new parameters to be shifted down in the UI. 
+- There should be a timeout for model calculations that take long.
+- The font in the help dialog is not monospaced, which makes it hard to read.
 
 ### Contributing
 Contributions are welcome! Feel free to open issues or submit pull requests.
