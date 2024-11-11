@@ -20,7 +20,7 @@ ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
 ureg.define(r"percent = 0.01 = %")
 ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
-
+from attrs import define, field
 
 def list_to_columnar_string(ListOfStrings:List[str], ncols:int=2, MinimumColumnWidth:int = 0, padding:str = "  ", ordering:str="columns"):
     """
@@ -30,14 +30,13 @@ def list_to_columnar_string(ListOfStrings:List[str], ncols:int=2, MinimumColumnW
     - ListOfStrings : a list of strings to be formatted.
     - ncols : the number of columns to format them into.
     - MinimumColumnWidth : the minimum width for each column. Will be expanded to fit the largest string
-    - padding : spacing string between columns
+    - padding : spacing string between columns, you can even do something fancy like " | "
     - ordering : 'columns' or 'rows'. If 'columns', then the content will appear in columns (like reading a newspaper), otherwise rows.
     """
 
     # only equal-width columns for now... set to the width of the largest single string    
     maxWidth = MinimumColumnWidth
     maxWidth = np.maximum(maxWidth, max([len(i) for i in ListOfStrings]))
-    # maxWidth += padding # pad a little extra
 
     # find out where to cut the list into chunks
     cut = int(np.ceil(len(ListOfStrings) / ncols))
@@ -59,24 +58,24 @@ def list_to_columnar_string(ListOfStrings:List[str], ncols:int=2, MinimumColumnW
     return "".join(ColumnarLines)
 
 class SasModelApp(QMainWindow):
-    q = None
+    q:np.ndarray = None
     model = None
     kernel = None
-    model_info = None
+    model_info:sasmodels.modelinfo.ModelInfo = None
     model_parameters = None
-    parameters = dict() # the actual parameter object references in the UI
-    parameter_choosers = None # for pulldown box choices
-    parameter_sliders = None # for sliders
-    parameter_inputs = None # sliders have a linked text input box 
-    parameter_checkboxes = None # checkboxes for future fitting
+    parameters:dict = dict() # the actual parameter object references in the UI
+    parameter_choosers:List = None # for pulldown box choices
+    parameter_sliders:List = None # for sliders
+    parameter_inputs:List = None # sliders have a linked text input box 
+    parameter_checkboxes:List = None # checkboxes for future fitting
     # Pattern list to exclude specific parameters
-    pd_types = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
-    q_units = ['1/nm', '1/Ångström', '1/m']
-    i_units = ['1/(m sr)', '1/(cm sr)']
-    qunit = None
-    infoText = None
+    pd_types:List = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
+    q_units:List = ['1/nm', '1/Ångström', '1/m']
+    i_units:List = ['1/(m sr)', '1/(cm sr)']
+    qunit:str = None
+    infoText:str = None
     
-    def __init__(self, modelName="sphere"):
+    def __init__(self, modelName:str="sphere") -> None:
         super().__init__()
         self.setWindowTitle("SasModels Interactive App")
         
@@ -146,11 +145,11 @@ class SasModelApp(QMainWindow):
 
         # Load initial model
         self.model_info = None
-        self.model_parameters = {}
+        self.model_parameters = None
         self.load_model_parameters()
 
 
-    def generate_infotext(self):
+    def generate_infotext(self)->str:
         """Generate the help text presented if an uninterpretable model is entered"""
         ncols = 3 # Number of columns for the model listing.       
         padding = "   " 
@@ -171,7 +170,7 @@ class SasModelApp(QMainWindow):
         return infoText
 
 
-    def remove_layout_and_widgets(self, item, starting_index:int=0):
+    def remove_layout_and_widgets(self, item, starting_index:int=0) -> None:
         # Clear only parameter-specific widgets in the control layout
         if hasattr(item, "layout"):
             if callable(item.layout):
@@ -194,7 +193,7 @@ class SasModelApp(QMainWindow):
                 if i>=starting_index:
                     self.remove_layout_and_widgets(layout.itemAt(i))
 
-    def load_model_parameters(self):
+    def load_model_parameters(self) -> None:
         model_name = self.model_input.text()
         try:
             # Load model info from sasmodels
@@ -272,7 +271,7 @@ class SasModelApp(QMainWindow):
             # if button == QMessageBox.Help:
             
 
-    def create_parameter_input_element(self, parameter: sasmodels.modelinfo.Parameter):
+    def create_parameter_input_element(self, parameter: sasmodels.modelinfo.Parameter) -> QHBoxLayout:
         assert isinstance(parameter, sasmodels.modelinfo.Parameter), 'parameter supplied to create_parameter must be a sasmodels parameter'
         logging.info(f"Creating parameter input element for {parameter}")
         # depending on the parameter choices and limits, create a pulldown box or slider
@@ -298,7 +297,7 @@ class SasModelApp(QMainWindow):
         
         return param_layout
 
-    def create_pulldown_menu_elements(self, choices:List, connected_function=None):
+    def create_pulldown_menu_elements(self, choices:List, connected_function=None) -> List:
         """create a pulldown menu with the parameter choices, a linked input box, and return it as a two-element list, total width = 500"""
         pulldown = QComboBox()
         for choice in choices:
@@ -310,7 +309,7 @@ class SasModelApp(QMainWindow):
             pulldown.currentIndexChanged.connect(lambda: connected_function())
         return [pulldown]
 
-    def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter):
+    def create_log_slider_and_input_elements(self, parameter:sasmodels.modelinfo.Parameter) -> List:
         """create a log-slider, input box and units text, return a three-elememnt list, total width = 500"""
         # Create a logarithmic slider for adjusting values
         slider = QSlider(Qt.Horizontal)
@@ -337,7 +336,7 @@ class SasModelApp(QMainWindow):
         return [slider, input_box, unit_text] #, fit_checkbox]
     
 
-    def value_to_log_slider(self, value, parameter:sasmodels.modelinfo.Parameter=None):
+    def value_to_log_slider(self, value:float, parameter:sasmodels.modelinfo.Parameter=None) -> int:
         """Convert a parameter value to a log slider position."""
         # Adjust range if necessary
         min_val, max_val = 1e-6, 1e3
@@ -352,7 +351,7 @@ class SasModelApp(QMainWindow):
             log_pos = int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
         return log_pos
 
-    def log_slider_to_value(self, slider_pos, parameter:sasmodels.modelinfo.Parameter=None):
+    def log_slider_to_value(self, slider_pos:int, parameter:sasmodels.modelinfo.Parameter=None)->float:
         """Convert a log slider position back to a parameter value."""
         min_val, max_val = 1e-6, 1e3
         # Adjust range if necessary
@@ -367,7 +366,7 @@ class SasModelApp(QMainWindow):
             value = 10 ** (np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val)))
         return value
 
-    def update_input_box(self, param_name):
+    def update_input_box(self, param_name:str)->None:
         # Get the slider value, convert it back to the original scale, and update the input box
         slider = self.parameter_sliders[param_name]
         value = self.log_slider_to_value(slider.value(), parameter=self.parameters[param_name])
@@ -375,7 +374,7 @@ class SasModelApp(QMainWindow):
         input_box.setText(f"{value:.6f}")
         self.update_plot()
 
-    def update_slider(self, param_name):
+    def update_slider(self, param_name:str)->None:
         # Get the value from the input box and update the corresponding slider
         input_box = self.parameter_inputs[param_name]
         try:
@@ -388,7 +387,7 @@ class SasModelApp(QMainWindow):
             slider = self.parameter_sliders[param_name]
             input_box.setText(f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}")
 
-    def get_slider_values(self):
+    def get_slider_values(self)->dict:
         # Retrieve values from sliders, adjusting them back to the parameter scale
         values = {param: self.log_slider_to_value(slider.value(), self.parameters[param]) for param, slider in self.parameter_sliders.items()}
 
@@ -402,7 +401,7 @@ class SasModelApp(QMainWindow):
 
         return values
     
-    def get_pulldown_values(self):
+    def get_pulldown_values(self)->dict:
         # Retrieve values from pulldowns, adjusting them back to the parameter scale
         values = {}
         for param, chooser in self.parameter_choosers.items():
@@ -414,19 +413,14 @@ class SasModelApp(QMainWindow):
 
         return values
 
-    def update_model_and_plot(self):
+    def update_model_and_plot(self) -> None:
         # Update the model and kernel, then plot the results
         logging.info(f'loading model {self.model_input.text()}')
         # try:
         self.model = sasmodels.core.load_model(self.model_input.text())
-        # except Exception as e:
-        #     QDialog.QMessageBox.warning(
-        #         self, "Invalid model", f"Could not load model {e}"
-        #     )
-        #     return
         self.update_kernel_and_plot()
 
-    def update_kernel_and_plot(self):
+    def update_kernel_and_plot(self) -> None:
         # Retrieve and validate q range and units
         logging.info(f'updating kernel')
         try:
@@ -443,7 +437,7 @@ class SasModelApp(QMainWindow):
         self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to('1/Ang').magnitude])
         self.update_plot()
 
-    def update_plot(self):
+    def update_plot(self) -> None:
         # Clear the current plot
         logging.info(f'updating plot')
         self.ax.clear()
