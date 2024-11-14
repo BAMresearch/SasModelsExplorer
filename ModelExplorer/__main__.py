@@ -1,3 +1,5 @@
+# ModelExplorer/__main__.py
+
 from modelexplorer import SasModelApp
 from utils.configure_logging import configure_logging
 from PyQt5.QtWidgets import QApplication

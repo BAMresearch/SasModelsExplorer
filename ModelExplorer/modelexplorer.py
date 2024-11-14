@@ -1,4 +1,4 @@
-# src/ModelExplorer/modelexplorer.py
+# ModelExplorer/modelexplorer.py
 
 import logging
 import re
