@@ -43,7 +43,7 @@ class SasModelApp(QMainWindow):
     
     def __init__(self, modelName:str="sphere") -> None:
         super().__init__()
-        self.setWindowTitle("SasModels Interactive App")
+        self.setWindowTitle("SasModels Explorer")
         
         # generate the infoText:
         self.infoText = self.generate_infotext()
