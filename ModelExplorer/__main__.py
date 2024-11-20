@@ -12,7 +12,7 @@ def setup_logging():
 def setup_args(args=None):
     import argparse
 
-    parser = argparse.ArgumentParser(description='SasModels interactive app')
+    parser = argparse.ArgumentParser(description='SasModels Explorer')
     parser.add_argument('model', nargs='?', default='sphere@hardsphere',
                         help='Model name to display')
     parser.add_argument(
