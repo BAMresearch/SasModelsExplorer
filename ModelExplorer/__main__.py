@@ -1,7 +1,7 @@
 # ModelExplorer/__main__.py
 
-from .modelexplorer import SasModelApp
-from .utils.configure_logging import configure_logging
+from modelexplorer import SasModelApp
+from utils.configure_logging import configure_logging
 from PyQt5.QtWidgets import QApplication
 import sys
 
@@ -41,7 +41,7 @@ def main():
     argv = sys.argv
     app = QApplication(argv)
     args = setup_args(argv[1:])
-    configure_logging(args.verbose, args.very_verbose, log_to_file=args.logging, log_file_prepend="HDF5Translator_")
+    configure_logging(args.verbose, args.very_verbose, log_to_file=args.logging, log_file_prepend="SasModelsExplorer_")
 
     window = SasModelApp(args.model)
     window.show()
