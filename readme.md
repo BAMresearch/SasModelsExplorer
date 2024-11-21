@@ -2,7 +2,7 @@
 
 A PyQt-based interactive application to explore scattering models using the `sasmodels` library.
 
-<img width="1010" alt="image" src="https://github.com/user-attachments/assets/cf9931d7-570b-4e46-9521-9c13bd190493">
+![SME](https://github.com/user-attachments/assets/9495bd08-09a6-43a2-92a1-67d7cb48e1a8)
 
 This app enables visualization and fine-tuning of model parameters via a user-friendly GUI, featuring both sliders and dropdown menus for parameter adjustments, and a real-time plot of scattering intensity.
 
