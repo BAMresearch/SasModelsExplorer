@@ -24,8 +24,9 @@ cd SasModelsExplorer
 2. (optional). setup a virtual enviroment for this explorer: `python3.12 -m venv .venv`
 3. (optional). activate the virtual environment: `source .venv/bin/activate`
 4. install the dependencies: `pip install -r requirements.txt`
-5. run the app: `python -m ModelExplorer -v sphere@hardsphere`
-6. (optional) deactivate the virtual environment: `deactivate`
+5. install this package: `pip install -e .`
+6. run the app: `python -m ModelExplorer -v sphere@hardsphere`
+7. (optional) deactivate the virtual environment: `deactivate`
 
 ## Using the GUI
 ### Loading a Model:
