@@ -21,7 +21,7 @@ ureg.define(r"percent = 0.01 = %")
 ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
 ureg.define(r"item = 1")
 from attrs import define, field
-from utils.list_to_columnar_string import list_to_columnar_string
+from .utils.list_to_columnar_string import list_to_columnar_string
 
 class SasModelApp(QMainWindow):
     q:np.ndarray = None
