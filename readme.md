@@ -18,8 +18,8 @@ This app enables visualization and fine-tuning of model parameters via a user-fr
 
 1. clone the repository: 
 ```bash
-git clone https://github.com/SasView/explorer`
-cd <repository folder>
+git clone https://github.com/BAMresearch/SasModelsExplorer.git`
+cd SasModelsExplorer
 ```
 2. (optional). setup a virtual enviroment for this explorer: `python3.12 -m venv .venv`
 3. (optional). activate the virtual environment: `source .venv/bin/activate`
