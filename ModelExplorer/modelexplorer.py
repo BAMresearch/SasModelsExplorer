@@ -176,7 +176,9 @@ class SasModelApp(QMainWindow):
             self.parameters.clear()
 
             # Dynamically add sliders and input boxes for each model parameter
-            for parameter in self.model.info.parameters.common_parameters+self.model.info.parameters.kernel_parameters:
+            # XSB: 5.5.2025 change to iterate through model_parameters written in call_parameters instead of the info parameters. allows to load 'core_multi_shell'
+            # for parameter in self.model.info.parameters.common_parameters+self.model.info.parameters.kernel_parameters:
+            for parameter in self.model.info.parameters.common_parameters+self.model_info.parameters.call_parameters:
                 self.parameters[parameter.name] = parameter
                 # Add the parameter layout for the current parameter
                 param_layout = self.create_parameter_input_element(parameter)
