@@ -59,6 +59,7 @@ class SasModelApp(QMainWindow):
         self.model_input.setFixedWidth(300)
         self.control_layout.addRow("Model:", self.model_input)
         self.model_input.returnPressed.connect(self.load_model_parameters)
+        self._parameter_row_start = self.control_layout.rowCount()
 
         # Scroll area for parameters
         scroll_widget = QWidget()
@@ -136,28 +137,34 @@ class SasModelApp(QMainWindow):
         return infoText
 
 
-    def remove_layout_and_widgets(self, item, starting_index:int=0) -> None:
-        # Clear only parameter-specific widgets in the control layout
-        if hasattr(item, "layout"):
-            if callable(item.layout):
-                layout = item.layout()
-        else:
-            layout = None
-
-        if hasattr(item, "widget"):
-            if callable(item.widget):
-                widget = item.widget()
-        else:
-            widget = None
-
-        if widget:
+    def _delete_layout_item(self, item) -> None:
+        if item is None:
+            return
+        widget = item.widget()
+        if widget is not None:
             widget.deleteLater()
-            widget=None
+            return
+        layout = item.layout()
+        if layout is not None:
+            while layout.count():
+                child = layout.takeAt(0)
+                self._delete_layout_item(child)
+            layout.deleteLater()
 
-        elif layout:
-            for i in reversed(range(layout.count())):
-                if i>=starting_index:
-                    self.remove_layout_and_widgets(layout.itemAt(i))
+    def clear_parameter_rows(self) -> None:
+        while self.control_layout.rowCount() > self._parameter_row_start:
+            row = self.control_layout.takeRow(self.control_layout.rowCount() - 1)
+            if row is None:
+                continue
+            if isinstance(row, (tuple, list)):
+                label_item, field_item = row
+            else:
+                label_item_attr = getattr(row, "labelItem", None)
+                field_item_attr = getattr(row, "fieldItem", None)
+                label_item = label_item_attr() if callable(label_item_attr) else label_item_attr
+                field_item = field_item_attr() if callable(field_item_attr) else field_item_attr
+            self._delete_layout_item(label_item)
+            self._delete_layout_item(field_item)
 
     def load_model_parameters(self) -> None:
         model_name = self.model_input.text()
@@ -167,7 +174,7 @@ class SasModelApp(QMainWindow):
             self.model_info = sasmodels.core.load_model_info(model_name)
             self.model_parameters = self.model_info.parameters.defaults.copy()
 
-            self.remove_layout_and_widgets(self.control_layout, starting_index=2)
+            self.clear_parameter_rows()
             # Reset the parameter-specific dictionaries to clear any previous model data
             self.parameter_sliders.clear()
             self.parameter_choosers.clear()
@@ -178,7 +185,11 @@ class SasModelApp(QMainWindow):
             # Dynamically add sliders and input boxes for each model parameter
             # XSB: 5.5.2025 change to iterate through model_parameters written in call_parameters instead of the info parameters. allows to load 'core_multi_shell'
             # for parameter in self.model.info.parameters.common_parameters+self.model.info.parameters.kernel_parameters:
+            seen_parameters = set()
             for parameter in self.model.info.parameters.common_parameters+self.model_info.parameters.call_parameters:
+                if parameter.name in seen_parameters:
+                    continue
+                seen_parameters.add(parameter.name)
                 self.parameters[parameter.name] = parameter
                 # Add the parameter layout for the current parameter
                 param_layout = self.create_parameter_input_element(parameter)
@@ -441,4 +452,3 @@ class SasModelApp(QMainWindow):
 
         # Refresh the canvas
         self.canvas.draw()
-
