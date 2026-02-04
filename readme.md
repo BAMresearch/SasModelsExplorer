@@ -67,7 +67,6 @@ The application uses `logging` for tracking parameter changes:
 ### Current issues
 Also check the "issues" in the Github repository.
 - The app currently does not display 2D scattering models. They will probably not be fast enough to be fun anyway
-- There is an issue clearing the parameters when entering a new model, causing the new parameters to be shifted down in the UI.
 - There should be a timeout for model calculations that take long.
 - The font in the help dialog is not monospaced, which makes it hard to read.
 
