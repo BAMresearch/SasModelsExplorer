@@ -52,6 +52,13 @@ Try these models to get started:
 The entire sasmodels library is available, which you can combine, multiply, subtract with the syntax alluded to above... A help text with the available models is displayed when a nonexistent model is entered.
 
 ## Under the hood
+### Code structure
+Key modules and their most important methods:
+- `ModelExplorer/modelexplorer.py`: `SasModelApp.load_model_parameters`, `SasModelApp.update_kernel_and_plot`, `SasModelApp.update_plot`
+- `ModelExplorer/parameter_panel.py`: `ParameterPanel.set_parameters`, `ParameterPanel.get_values`
+- `ModelExplorer/sasmodels_adapter.py`: `build_parameter_list`, `load_model_and_info`
+- `ModelExplorer/plotting.py`: `PlotManager.plot`
+
 ### Logging and Debugging
 The application uses `logging` for tracking parameter changes:
 - Logs are printed in the console to show current parameter values.

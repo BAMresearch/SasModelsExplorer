@@ -6,10 +6,12 @@ from PyQt5.QtWidgets import QApplication
 import sys
 
 def setup_logging():
+    """Configure basic console logging for the CLI entrypoint."""
     import logging
     logging.basicConfig(level=logging.INFO)
 
 def setup_args(args=None):
+    """Parse CLI arguments for model selection and logging options."""
     import argparse
 
     parser = argparse.ArgumentParser(description='SasModels Explorer')
@@ -38,6 +40,7 @@ def setup_args(args=None):
     return args
 
 def main():
+    """Launch the Qt application."""
     argv = sys.argv
     app = QApplication(argv)
     args = setup_args(argv[1:])
