@@ -1,15 +1,21 @@
 # ModelExplorer/utils/configure_logging.py
 
 import logging
-from pathlib import Path
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Union
 
-def configure_logging(verbose: bool = False, very_verbose: bool = False, log_to_file: Union[bool, Path] = True, log_file_prepend: str = "HDF5Translator_"):
+
+def configure_logging(
+    verbose: bool = False,
+    very_verbose: bool = False,
+    log_to_file: Union[bool, Path] = True,
+    log_file_prepend: str = "HDF5Translator_",
+):
     """
     Configure logging to output to stdout and an optional log file.
-    
+
     Args:
         verbose (bool): Enable verbose logging output.
         very_verbose (bool): Enable very verbose logging output.
@@ -18,9 +24,8 @@ def configure_logging(verbose: bool = False, very_verbose: bool = False, log_to_
     """
     log_format = "%(asctime)s - %(levelname)s - %(message)s"
     log_datefmt = "%Y-%m-%d %H:%M:%S"
-    
 
-    if very_verbose: 
+    if very_verbose:
         level = logging.DEBUG
     elif verbose:
         level = logging.INFO

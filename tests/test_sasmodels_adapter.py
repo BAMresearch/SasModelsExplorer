@@ -4,7 +4,6 @@ from ModelExplorer.sasmodels_adapter import (
     split_magnetic_parameters,
 )
 
-
 PD_TYPES = ["uniform", "rectangle", "gaussian", "lognormal", "schulz", "boltzmann"]
 
 

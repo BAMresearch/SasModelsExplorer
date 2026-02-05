@@ -1,22 +1,26 @@
 # ModelExplorer/__main__.py
 
-from .modelexplorer import SasModelApp
-from .utils.configure_logging import configure_logging
-from PyQt5.QtWidgets import QApplication
 import sys
+
+from PyQt5.QtWidgets import QApplication
+
+from ModelExplorer.modelexplorer import SasModelApp
+from ModelExplorer.utils.configure_logging import configure_logging
+
 
 def setup_logging():
     """Configure basic console logging for the CLI entrypoint."""
     import logging
+
     logging.basicConfig(level=logging.INFO)
+
 
 def setup_args(args=None):
     """Parse CLI arguments for model selection and logging options."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='SasModels Explorer')
-    parser.add_argument('model', nargs='?', default='sphere@hardsphere',
-                        help='Model name to display')
+    parser = argparse.ArgumentParser(description="SasModels Explorer")
+    parser.add_argument("model", nargs="?", default="sphere@hardsphere", help="Model name to display")
     parser.add_argument(
         "-v",
         "--verbose",
@@ -39,6 +43,7 @@ def setup_args(args=None):
 
     return args
 
+
 def main():
     """Launch the Qt application."""
     argv = sys.argv
@@ -49,6 +54,7 @@ def main():
     window = SasModelApp(args.model)
     window.show()
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()

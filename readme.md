@@ -16,7 +16,7 @@ This app enables visualization and fine-tuning of model parameters via a user-fr
 
 ## Installation and Usage
 
-1. clone the repository: 
+1. clone the repository:
 ```bash
 git clone https://github.com/BAMresearch/SasModelsExplorer.git
 cd SasModelsExplorer
@@ -28,10 +28,35 @@ cd SasModelsExplorer
 6. run the app: `python -m ModelExplorer -v sphere@hardsphere`
 7. (optional) deactivate the virtual environment: `deactivate`
 
+## Development
+
+Install dev tools and enable pre-commit hooks:
+
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
+Ruff handles linting and formatting (`ruff check` / `ruff format`).
+
+## Building executables
+
+With your local `.venv` active, run:
+
+```bash
+python scripts/build_executable.py
+```
+
+This uses PyInstaller with the required `sasmodels` data and submodules bundled. The output binary will be placed in `dist/SasModelsExplorer`.
+
+Windows notes:
+- Use a PowerShell prompt with the `.venv` activated: `.venv\\Scripts\\Activate.ps1`
+- The executable will be `dist\\SasModelsExplorer.exe`
+
 ## Using the GUI
 ### Loading a Model:
 
-Type the model name (e.g., "sphere", "cylinder", or sasmodels-syntax combinations such as 
+Type the model name (e.g., "sphere", "cylinder", or sasmodels-syntax combinations such as
 "sphere@hardsphere+cylinder") in the model field and press Enter to load it.
 The app will display parameter controls for the model.
 
@@ -40,7 +65,7 @@ The app will display parameter controls for the model.
 Sliders and Text Boxes: Each parameter has an adjustable slider and a text box for exact values. Logarithmic sliders enable wide-range adjustments.
 Dropdown Menus: Parameters with multiple text options (e.g., _pd_type for polydispersity) appear as dropdowns.
 Polydispersity Controls: Automatically includes controls for relevant parameters: polydispersity and (default number-weighted) distribution shape.
-Axis controls: Under the graph, the q limits and q units can be adjusted. 
+Axis controls: Under the graph, the q limits and q units can be adjusted.
 
 ### Example Models
 Try these models to get started:

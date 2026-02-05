@@ -2,16 +2,24 @@
 
 import logging
 from typing import List
-from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QMessageBox,
-                             QLabel, QLineEdit, QComboBox, QSplitter, QCheckBox)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+
 import numpy as np
 import pint
-ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
-ureg.define(r"percent = 0.01 = %")
-ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
-ureg.define(r"item = 1")
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
 from .parameter_panel import ParameterPanel
 from .plotting import PlotManager
 from .sasmodels_adapter import (
@@ -22,24 +30,31 @@ from .sasmodels_adapter import (
     split_magnetic_parameters,
 )
 
+ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
+ureg.define(r"percent = 0.01 = %")
+ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
+ureg.define(r"item = 1")
+
+
 class SasModelApp(QMainWindow):
     """Main PyQt window that wires model inputs, parameter panel, and plotting."""
-    q:np.ndarray = None
+
+    q: np.ndarray = None
     model = None
     kernel = None
     model_info = None
     model_parameters = None
-    pd_types:List = ['uniform', 'rectangle', 'gaussian', 'lognormal', 'schulz', 'boltzmann']
-    q_units:List = ['1/nm', '1/Ångström', '1/m']
-    i_units:List = ['1/(m sr)', '1/(cm sr)']
-    qunit:str = None
-    infoText:str = None
-    
-    def __init__(self, modelName:str="sphere") -> None:
+    pd_types: List = ["uniform", "rectangle", "gaussian", "lognormal", "schulz", "boltzmann"]
+    q_units: List = ["1/nm", "1/Ångström", "1/m"]
+    i_units: List = ["1/(m sr)", "1/(cm sr)"]
+    qunit: str = None
+    infoText: str = None
+
+    def __init__(self, modelName: str = "sphere") -> None:
         """Initialize the UI, wire signals, and load the initial model."""
         super().__init__()
         self.setWindowTitle("SasModels Explorer")
-        
+
         # generate the infoText:
         self.infoText = generate_model_info_text()
 
@@ -102,11 +117,9 @@ class SasModelApp(QMainWindow):
         self.model_parameters = None
         self.load_model_parameters()
 
-
-    def generate_infotext(self)->str:
+    def generate_infotext(self) -> str:
         """Return the help text shown when a model name is invalid."""
         return generate_model_info_text()
-
 
     def load_model_parameters(self) -> None:
         """Load model info, rebuild parameter controls, and trigger a plot refresh."""
@@ -136,7 +149,6 @@ class SasModelApp(QMainWindow):
             font.setFamily("Courier")
             font.setPointSize(9)
 
-
             dialog = QMessageBox(self)
             dialog.setWindowTitle("Invalid model")
             dialog.setText(f"Could not load model '{model_name}': {e}")
@@ -150,7 +162,6 @@ class SasModelApp(QMainWindow):
             else:
                 dialog.close()
             # if button == QMessageBox.Help:
-            
 
     def update_model_and_plot(self) -> None:
         """Rebuild the kernel (if needed) and refresh the plot."""
@@ -159,19 +170,19 @@ class SasModelApp(QMainWindow):
     def update_kernel_and_plot(self) -> None:
         """Update the sasmodels kernel using the current q range/units."""
         # Retrieve and validate q range and units
-        logging.info(f'updating kernel')
+        logging.info("updating kernel")
         try:
             qmin = float(self.q_min_input.text())
             qmax = float(self.q_max_input.text())
             qunit = self.q_unit_input.currentText()
         except ValueError:
             qmin, qmax = 0.01, 1.0  # Default values in case of error
-            qunit = '1/nm'
-        
+            qunit = "1/nm"
+
         # Prepare parameters for sasmodel
         self.q = np.geomspace(qmin, qmax, 250)
         self.qunit = qunit
-        self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to('1/Ang').magnitude])
+        self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to("1/Ang").magnitude])
         self.update_plot()
 
     def update_plot(self) -> None:
@@ -191,11 +202,11 @@ class SasModelApp(QMainWindow):
             parameters[pd_n] = 35
 
         # Compute intensity
-        q=self.q
-        qunit=self.qunit
+        q = self.q
+        qunit = self.qunit
         # model = self.model
         kernel = self.kernel
-        logging.info(f'calling sasmodels with {[{p: v} for p, v in parameters.items()]}')
+        logging.info(f"calling sasmodels with {[{p: v} for p, v in parameters.items()]}")
         intensity = compute_intensity(kernel, parameters)
 
         self.plot_manager.plot(q, intensity, qunit)

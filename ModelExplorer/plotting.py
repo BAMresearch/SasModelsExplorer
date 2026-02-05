@@ -1,11 +1,12 @@
 # ModelExplorer/plotting.py
 
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 
 class PlotManager:
     """Small wrapper around a Matplotlib canvas for consistent plotting."""
+
     def __init__(self, figsize=(6, 4)) -> None:
         """Create the figure, axes, and Qt canvas."""
         self.figure, self.ax = plt.subplots(figsize=figsize)

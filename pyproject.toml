@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SasModelsExplorer"
+version = "0.1"
+description = "A PyQt-based interactive application for exploring scattering models using sasmodels library."
+readme = "readme.md"
+requires-python = ">=3.6"
+dependencies = [
+  "PyQt5",
+  "sasmodels",
+  "numpy",
+  "matplotlib",
+  "pint",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+ModelExplorer = "ModelExplorer.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pre-commit",
+  "ruff",
+]
+
+[tool.ruff]
+line-length = 120
+lint.select = ["E", "F", "W", "B", "C90", "I"]
+lint.ignore = ["E203", "E266", "E501", "F403", "F401", "F405", "F821"]
+lint.mccabe.max-complexity = 18
+
+[tool.ruff.format]
+
+[tool.setuptools.packages.find]
+include = ["ModelExplorer*"]
