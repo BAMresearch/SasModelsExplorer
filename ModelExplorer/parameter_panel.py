@@ -3,8 +3,8 @@
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 
 class ParameterPanel(QScrollArea):
     """Scrollable UI panel that renders sasmodels parameters and reads user values."""
+
     def __init__(self, on_change: Optional[Callable[[], None]] = None, width: int = 450) -> None:
         """Initialize the panel with optional change callback and fixed width."""
         super().__init__()
@@ -121,7 +122,7 @@ class ParameterPanel(QScrollArea):
 
     def create_log_slider_and_input_elements(self, parameter) -> List[object]:
         """Build a log slider, input box, and unit label for numeric parameters."""
-        slider = QSlider(Qt.Horizontal)
+        slider = QSlider(Qt.Orientation.Horizontal)
         slider.setFixedWidth(150)
         slider.setMinimum(0)
         slider.setMaximum(1000)
@@ -145,11 +146,7 @@ class ParameterPanel(QScrollArea):
 
         if value == 0:
             return 0
-        return int(
-            1000
-            * (np.log10(value) - np.log10(min_val))
-            / (np.log10(max_val) - np.log10(min_val))
-        )
+        return int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
 
     def log_slider_to_value(self, slider_pos: int, parameter=None) -> float:
         """Map a log slider position back to the parameter value."""
@@ -160,9 +157,7 @@ class ParameterPanel(QScrollArea):
 
         if slider_pos == 0:
             return 0
-        return 10 ** (
-            np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val))
-        )
+        return 10 ** (np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val)))
 
     def update_input_box(self, param_name: str) -> None:
         """Sync the text input when a slider changes and trigger redraw."""
@@ -182,9 +177,7 @@ class ParameterPanel(QScrollArea):
             self._trigger_change()
         except ValueError:
             slider = self.parameter_sliders[param_name]
-            input_box.setText(
-                f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}"
-            )
+            input_box.setText(f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}")
 
     def get_values(self) -> Dict[str, float]:
         """Return a dict of current parameter values from all controls."""

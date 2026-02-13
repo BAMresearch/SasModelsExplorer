@@ -5,9 +5,9 @@ from typing import List
 
 import numpy as np
 import pint
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -104,7 +104,7 @@ class SasModelApp(QMainWindow):
         plot_container = QWidget()
         plot_container.setLayout(plot_layout)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.parameter_panel)
         splitter.addWidget(plot_container)
         splitter.setStretchFactor(0, 1)

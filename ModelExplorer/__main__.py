@@ -2,7 +2,7 @@
 
 import sys
 
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
 from ModelExplorer.modelexplorer import SasModelApp
 from ModelExplorer.utils.configure_logging import configure_logging
@@ -53,7 +53,7 @@ def main():
 
     window = SasModelApp(args.model)
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
