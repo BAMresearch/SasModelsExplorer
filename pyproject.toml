@@ -9,11 +9,15 @@ description = "A PyQt-based interactive application for exploring scattering mod
 readme = "readme.md"
 requires-python = ">=3.6"
 dependencies = [
-  "PyQt5",
+  "PyQt6",
   "sasmodels",
   "numpy",
   "matplotlib",
   "pint",
+  "PyYAML",
+  "pandas",
+  "h5py",
+  "scipy",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",

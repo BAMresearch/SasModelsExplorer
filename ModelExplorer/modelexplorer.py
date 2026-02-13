@@ -1,13 +1,13 @@
 # ModelExplorer/modelexplorer.py
 
 import logging
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pint
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -16,10 +16,13 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from .data_loading_panel import DataLoadingPanel
+from .fitting_panel import FittingPanel
 from .parameter_panel import ParameterPanel
 from .plotting import PlotManager
 from .sasmodels_adapter import (
@@ -74,6 +77,8 @@ class SasModelApp(QMainWindow):
 
         # Right layout for plot
         self.plot_manager = PlotManager(figsize=(6, 4))
+        self.data_panel = DataLoadingPanel()
+        self.data_panel.dataChanged.connect(self.update_plot)
 
         # qmin and qmax inputs below the plot
         self.q_min_input = QLineEdit("0.01")
@@ -104,9 +109,23 @@ class SasModelApp(QMainWindow):
         plot_container = QWidget()
         plot_container.setLayout(plot_layout)
 
-        splitter = QSplitter(Qt.Horizontal)
+        self.fit_panel = FittingPanel()
+        self.fit_panel.fitRequested.connect(self._run_fit)
+
+        side_tabs = QTabWidget()
+        side_tabs.addTab(self.data_panel, "Data")
+        side_tabs.addTab(self.fit_panel, "Fitting")
+        side_tabs.setMinimumWidth(320)
+
+        right_splitter = QSplitter(Qt.Orientation.Horizontal)
+        right_splitter.addWidget(plot_container)
+        right_splitter.addWidget(side_tabs)
+        right_splitter.setStretchFactor(0, 3)
+        right_splitter.setStretchFactor(1, 1)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.parameter_panel)
-        splitter.addWidget(plot_container)
+        splitter.addWidget(right_splitter)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
@@ -123,6 +142,11 @@ class SasModelApp(QMainWindow):
 
     def load_model_parameters(self) -> None:
         """Load model info, rebuild parameter controls, and trigger a plot refresh."""
+        previous_values = {}
+        if self.parameter_panel is not None:
+            previous_values = self.parameter_panel.get_values()
+            previous_values.update(self.hidden_parameter_defaults)
+        previous_fit_selection = self.fit_panel.get_selected_parameters()
         model_name = self.model_input.text()
         try:
             # Load model info from sasmodels
@@ -133,8 +157,17 @@ class SasModelApp(QMainWindow):
             visible_parameters, hidden_defaults = split_magnetic_parameters(
                 parameters, self.show_magnetic_checkbox.isChecked()
             )
+            for name in hidden_defaults:
+                if name in previous_values:
+                    hidden_defaults[name] = previous_values[name]
             self.hidden_parameter_defaults = hidden_defaults
             self.parameter_panel.set_parameters(visible_parameters)
+            self.parameter_panel.set_values(
+                {name: value for name, value in previous_values.items() if name in self.parameter_panel.parameters},
+                emit_change=False,
+            )
+            self.fit_panel.set_parameters(self.parameter_panel.parameters)
+            self.fit_panel.set_selected_parameters(previous_fit_selection)
             # Initial plot
             self.update_model_and_plot()
 
@@ -202,11 +235,202 @@ class SasModelApp(QMainWindow):
             parameters[pd_n] = 35
 
         # Compute intensity
-        q = self.q
-        qunit = self.qunit
+        Q = self.q
+        Q_unit = self.qunit
         # model = self.model
         kernel = self.kernel
         logging.info(f"calling sasmodels with {[{p: v} for p, v in parameters.items()]}")
-        intensity = compute_intensity(kernel, parameters)
+        I_model = compute_intensity(kernel, parameters)
 
-        self.plot_manager.plot(q, intensity, qunit)
+        data_bundle = self.data_panel.get_data_bundle()
+        overlay_data = self._prepare_overlay_data(data_bundle, Q_unit, self.i_units[0])
+        chi2, dof, points = self._compute_reduced_chi_square(Q, I_model, overlay_data)
+        chi_text = f"chi^2_red={chi2:.4g}" if chi2 is not None else None
+        self.data_panel.set_chi_square(chi2, dof, points)
+        self.plot_manager.plot(Q, I_model, Q_unit, data=overlay_data, chi_square_text=chi_text)
+
+    def _prepare_overlay_data(
+        self, data_bundle: Optional[Any], target_Q_unit: str, target_I_unit: str
+    ) -> Optional[Dict[str, Any]]:
+        if data_bundle is None:
+            return None
+        data_I = data_bundle.get("I")
+        data_Q = data_bundle.get("Q")
+        if data_I is None or data_Q is None:
+            return None
+
+        I_copy = self._copy_basedata(data_I)
+        Q_copy = self._copy_basedata(data_Q)
+
+        target_Q_unit = target_Q_unit.replace("\u00c5ngstr\u00f6m", "Angstrom").replace("\u00c5", "Angstrom")
+        try:
+            Q_copy.to_units(target_Q_unit)
+            I_copy.to_units(target_I_unit)
+        except Exception:
+            pass
+
+        Q_vals = np.asarray(Q_copy.signal, dtype=float)
+        I_vals = np.asarray(I_copy.signal, dtype=float)
+        sigma = None
+        if "ISigma" in I_copy.uncertainties:
+            sigma = np.asarray(I_copy.uncertainties["ISigma"], dtype=float)
+
+        mask = np.isfinite(Q_vals) & np.isfinite(I_vals)
+        if sigma is not None:
+            mask &= np.isfinite(sigma)
+
+        Q_vals = Q_vals[mask]
+        I_vals = I_vals[mask]
+        if sigma is not None:
+            sigma = sigma[mask]
+
+        if Q_vals.size == 0:
+            return None
+
+        order = np.argsort(Q_vals)
+        Q_vals = Q_vals[order]
+        I_vals = I_vals[order]
+        if sigma is not None:
+            sigma = sigma[order]
+
+        label = getattr(data_bundle, "description", None) or "Data"
+        return {"Q": Q_vals, "I": I_vals, "ISigma": sigma, "label": label}
+
+    def _copy_basedata(self, source: Any) -> Any:
+        uncertainties = {key: np.array(val, copy=True) for key, val in source.uncertainties.items()}
+        weights = np.array(getattr(source, "weights", 1.0), copy=True)
+        return source.__class__(
+            signal=np.array(source.signal, copy=True),
+            units=source.units,
+            uncertainties=uncertainties,
+            weights=weights,
+            rank_of_data=getattr(source, "rank_of_data", 0),
+        )
+
+    def _compute_reduced_chi_square(
+        self,
+        Q: np.ndarray,
+        I: np.ndarray,  # noqa: E741
+        data: Optional[Dict[str, Any]],  # noqa: E741
+    ) -> Tuple[Optional[float], Optional[int], Optional[int]]:
+        if data is None:
+            return None, None, None
+        data_Q = data.get("Q")
+        data_I = data.get("I")
+        data_sigma = data.get("ISigma")
+        if data_Q is None or data_I is None or data_sigma is None:
+            return None, None, None
+
+        try:
+            model_I = self._interpolate_model(Q, I, data_Q) * self.plot_manager.scale
+        except Exception:
+            return None, None, None
+
+        mask = np.isfinite(model_I) & np.isfinite(data_I) & np.isfinite(data_sigma) & (data_sigma > 0)
+        if mask.sum() < 2:
+            return None, None, None
+
+        n_params = len(self.parameter_panel.get_values())
+        dof = max(int(mask.sum()) - n_params, 1)
+        chi2 = np.sum(((data_I[mask] - model_I[mask]) / data_sigma[mask]) ** 2) / dof
+        return float(chi2), dof, int(mask.sum())
+
+    def _interpolate_model(self, Q_model: np.ndarray, I_model: np.ndarray, Q_data: np.ndarray) -> np.ndarray:
+        Q_model = np.asarray(Q_model, dtype=float)
+        I_model = np.asarray(I_model, dtype=float)
+        Q_data = np.asarray(Q_data, dtype=float)
+        if np.any(Q_model <= 0) or np.any(I_model <= 0) or np.any(Q_data <= 0):
+            return np.interp(Q_data, Q_model, I_model, left=np.nan, right=np.nan)
+        log_Q = np.log10(Q_model)
+        log_I = np.log10(I_model)
+        log_Qd = np.log10(Q_data)
+        log_I_interp = np.interp(log_Qd, log_Q, log_I, left=np.nan, right=np.nan)
+        return 10**log_I_interp
+
+    def _run_fit(self) -> None:
+        try:
+            from scipy.optimize import least_squares
+        except Exception:
+            self.fit_panel.set_status("scipy is required for fitting.")
+            return
+
+        fit_names = self.fit_panel.get_selected_parameters()
+        if not fit_names:
+            self.fit_panel.set_status("Select parameters to fit.")
+            return
+
+        data_bundle = self.data_panel.get_data_bundle()
+        overlay_data = self._prepare_overlay_data(data_bundle, self.qunit, self.i_units[0])
+        if overlay_data is None:
+            self.fit_panel.set_status("Load data before fitting.")
+            return
+
+        data_Q = overlay_data.get("Q")
+        data_I = overlay_data.get("I")
+        data_sigma = overlay_data.get("ISigma")
+        if data_Q is None or data_I is None or data_sigma is None:
+            self.fit_panel.set_status("Data uncertainties are required for fitting.")
+            return
+
+        try:
+            kernel = self.model.make_kernel([data_Q * ureg.Quantity(1, self.qunit).to("1/Ang").magnitude])
+        except Exception as exc:
+            self.fit_panel.set_status(f"Kernel error: {exc}")
+            return
+
+        parameters = self.parameter_panel.get_values()
+        parameters.update(self.hidden_parameter_defaults)
+
+        pd_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
+        for param in pd_params:
+            parameters[param + "_pd_n"] = 35
+
+        x0 = []
+        lower = []
+        upper = []
+        used_names = []
+        for name in fit_names:
+            param_obj = self.parameter_panel.parameters.get(name)
+            if param_obj is None:
+                continue
+            limits = getattr(param_obj, "limits", None) or (-np.inf, np.inf)
+            low, high = float(limits[0]), float(limits[1])
+            value = float(parameters.get(name, param_obj.default))
+            if np.isfinite(low) and value <= low:
+                value = low + 1e-12
+            if np.isfinite(high) and value >= high:
+                value = high - 1e-12
+            used_names.append(name)
+            x0.append(value)
+            lower.append(low)
+            upper.append(high)
+
+        if not used_names:
+            self.fit_panel.set_status("No numeric parameters selected.")
+            return
+
+        x0 = np.array(x0, dtype=float)
+        bounds = (np.array(lower, dtype=float), np.array(upper, dtype=float))
+
+        def residuals(x: np.ndarray) -> np.ndarray:
+            for name, value in zip(used_names, x):
+                parameters[name] = float(value)
+            model_I = compute_intensity(kernel, parameters) * self.plot_manager.scale
+            return (model_I - data_I) / data_sigma
+
+        self.fit_panel.set_status("Fitting...")
+        result = least_squares(
+            residuals,
+            x0,
+            bounds=bounds,
+            max_nfev=self.fit_panel.get_max_iterations(),
+        )
+
+        for name, value in zip(used_names, result.x):
+            parameters[name] = float(value)
+
+        self.parameter_panel.set_values(parameters)
+        if result.success:
+            self.fit_panel.set_status("Fit complete.")
+        else:
+            self.fit_panel.set_status(f"Fit stopped: {result.message}")

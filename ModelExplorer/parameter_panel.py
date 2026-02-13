@@ -3,8 +3,8 @@
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 
 class ParameterPanel(QScrollArea):
     """Scrollable UI panel that renders sasmodels parameters and reads user values."""
+
     def __init__(self, on_change: Optional[Callable[[], None]] = None, width: int = 450) -> None:
         """Initialize the panel with optional change callback and fixed width."""
         super().__init__()
@@ -121,7 +122,7 @@ class ParameterPanel(QScrollArea):
 
     def create_log_slider_and_input_elements(self, parameter) -> List[object]:
         """Build a log slider, input box, and unit label for numeric parameters."""
-        slider = QSlider(Qt.Horizontal)
+        slider = QSlider(Qt.Orientation.Horizontal)
         slider.setFixedWidth(150)
         slider.setMinimum(0)
         slider.setMaximum(1000)
@@ -143,13 +144,17 @@ class ParameterPanel(QScrollArea):
             min_val = np.maximum(min_val, parameter.limits[0])
             max_val = np.minimum(parameter.limits[1], max_val)
 
-        if value == 0:
+        if not np.isfinite(min_val) or min_val <= 0:
+            min_val = 1e-6
+        if not np.isfinite(max_val) or max_val <= min_val:
+            max_val = min_val * 1e3
+        if not np.isfinite(value) or value <= 0:
             return 0
-        return int(
-            1000
-            * (np.log10(value) - np.log10(min_val))
-            / (np.log10(max_val) - np.log10(min_val))
-        )
+        if value < min_val:
+            value = min_val
+        if value > max_val:
+            value = max_val
+        return int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
 
     def log_slider_to_value(self, slider_pos: int, parameter=None) -> float:
         """Map a log slider position back to the parameter value."""
@@ -160,9 +165,7 @@ class ParameterPanel(QScrollArea):
 
         if slider_pos == 0:
             return 0
-        return 10 ** (
-            np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val))
-        )
+        return 10 ** (np.log10(min_val) + slider_pos / 1000 * (np.log10(max_val) - np.log10(min_val)))
 
     def update_input_box(self, param_name: str) -> None:
         """Sync the text input when a slider changes and trigger redraw."""
@@ -182,9 +185,7 @@ class ParameterPanel(QScrollArea):
             self._trigger_change()
         except ValueError:
             slider = self.parameter_sliders[param_name]
-            input_box.setText(
-                f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}"
-            )
+            input_box.setText(f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}")
 
     def get_values(self) -> Dict[str, float]:
         """Return a dict of current parameter values from all controls."""
@@ -201,6 +202,33 @@ class ParameterPanel(QScrollArea):
                 values[param] = chooser.currentIndex()
 
         return values
+
+    def set_values(self, values: Dict[str, float], emit_change: bool = True) -> None:
+        """Set current parameter values for sliders and dropdowns."""
+        for param_name, value in values.items():
+            if param_name in self.parameter_sliders:
+                slider = self.parameter_sliders[param_name]
+                input_box = self.parameter_inputs[param_name]
+                slider.blockSignals(True)
+                input_box.blockSignals(True)
+                slider.setValue(self.value_to_log_slider(value, self.parameters[param_name]))
+                input_box.setText(f"{value:.6g}")
+                slider.blockSignals(False)
+                input_box.blockSignals(False)
+            elif param_name in self.parameter_choosers:
+                chooser = self.parameter_choosers[param_name]
+                chooser.blockSignals(True)
+                if isinstance(value, str):
+                    parameter = self.parameters.get(param_name)
+                    choices = getattr(parameter, "choices", None) or []
+                    if value in choices:
+                        chooser.setCurrentIndex(choices.index(value))
+                else:
+                    chooser.setCurrentIndex(int(value))
+                chooser.blockSignals(False)
+
+        if emit_change:
+            self._trigger_change()
 
     def _trigger_change(self) -> None:
         """Invoke the change callback if provided."""

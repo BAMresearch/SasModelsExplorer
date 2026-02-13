@@ -1,6 +1,10 @@
 matplotlib
 numpy
-PyQt5
+PyQt6
 sasmodels
 Pint
 attrs
+PyYAML
+pandas
+h5py
+scipy
