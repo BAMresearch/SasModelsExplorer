@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
@@ -14,6 +15,7 @@ class PlotManager:
 
     def __init__(self, figsize=(6, 4)) -> None:
         """Create the figure, axes, and Qt canvas."""
+        matplotlib.use("QtAgg", force=True)
         self.figure, self.ax = plt.subplots(figsize=figsize)
         self.canvas = FigureCanvas(self.figure)
         self.scale = MODEL_INTENSITY_SCALE
@@ -28,6 +30,8 @@ class PlotManager:
     ) -> None:
         """Render the current intensity curve on log-log axes."""
         self.ax.clear()
+        self.ax.set_axisbelow(True)
+        self.ax.minorticks_on()
         model_label = "Model"
         if chi_square_text:
             model_label = f"Model ({chi_square_text})"
@@ -48,6 +52,8 @@ class PlotManager:
         self.ax.set_yscale("log")
         self.ax.set_xlabel(f"Q ({Q_unit})")
         self.ax.set_ylabel("I (1/(m sr))")
+        self.ax.grid(which="major", color="0.85", linewidth=0.6)
+        self.ax.grid(which="minor", color="0.9", linewidth=0.4)
         if data is not None or chi_square_text:
             self.ax.legend()
         self.canvas.draw()

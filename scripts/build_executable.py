@@ -10,13 +10,14 @@ def main() -> int:
     cmd = [
         "pyinstaller",
         "--windowed",
-        "--onefile",
         "-n",
         "SasModelsExplorer",
         "--collect-all",
         "sasmodels",
         "--collect-submodules",
         "sasmodels.models",
+        "--hidden-import",
+        "scipy.special._cdflib",
         "ModelExplorer/__main__.py",
     ]
     print("Running:", " ".join(cmd))

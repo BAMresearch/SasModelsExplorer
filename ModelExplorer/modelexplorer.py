@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPushButton,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -69,7 +71,7 @@ class SasModelApp(QMainWindow):
         self.parameter_panel.add_header_row("Model:", self.model_input)
         self.model_input.returnPressed.connect(self.load_model_parameters)
         self.show_magnetic_checkbox = QCheckBox("Show")
-        self.show_magnetic_checkbox.setChecked(True)
+        self.show_magnetic_checkbox.setChecked(False)
         self.show_magnetic_checkbox.stateChanged.connect(self.load_model_parameters)
         self.parameter_panel.add_header_row("Magnetic:", self.show_magnetic_checkbox)
         self.hidden_parameter_defaults = {}
@@ -94,11 +96,13 @@ class SasModelApp(QMainWindow):
 
         # Layout for q range inputs
         q_range_layout = QHBoxLayout()
+        q_range_layout.addStretch(1)
         q_range_layout.addWidget(QLabel("Q Min:"))
         q_range_layout.addWidget(self.q_min_input)
         q_range_layout.addWidget(self.q_unit_input)
         q_range_layout.addWidget(QLabel("Q Max:"))
         q_range_layout.addWidget(self.q_max_input)
+        q_range_layout.addStretch(1)
 
         # Vertical layout for plot and q range controls
         plot_layout = QVBoxLayout()
@@ -108,23 +112,50 @@ class SasModelApp(QMainWindow):
         plot_container = QWidget()
         plot_container.setLayout(plot_layout)
 
+        self.side_panel_button = QPushButton("◀")
+        self.side_panel_button.clicked.connect(self._toggle_side_panel)
+        self.side_panel_button.setStyleSheet(
+            "QPushButton { background-color: #f4f4f4; border: 0px solid #dddddd; }"
+            "QPushButton:pressed { background-color: #e9e9e9; }"
+        )
+
+        toggle_layout = QVBoxLayout()
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.addWidget(self.side_panel_button)
+
+        toggle_container = QWidget()
+        toggle_container.setLayout(toggle_layout)
+        toggle_container.setFixedWidth(13)
+        self.side_panel_button.setSizePolicy(
+            self.side_panel_button.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Expanding,
+        )
+
+        plot_with_toggle_layout = QHBoxLayout()
+        plot_with_toggle_layout.setContentsMargins(0, 0, 0, 0)
+        plot_with_toggle_layout.addWidget(plot_container)
+        plot_with_toggle_layout.addWidget(toggle_container)
+
+        plot_with_toggle = QWidget()
+        plot_with_toggle.setLayout(plot_with_toggle_layout)
+
         self.fit_panel = FittingPanel()
         self.fit_panel.fitRequested.connect(self._run_fit)
 
-        side_tabs = QTabWidget()
-        side_tabs.addTab(self.data_panel, "Data")
-        side_tabs.addTab(self.fit_panel, "Fitting")
-        side_tabs.setMinimumWidth(320)
+        self.side_tabs = QTabWidget()
+        self.side_tabs.addTab(self.data_panel, "Data")
+        self.side_tabs.addTab(self.fit_panel, "Fitting")
+        self.side_tabs.setMinimumWidth(320)
 
-        right_splitter = QSplitter(Qt.Orientation.Horizontal)
-        right_splitter.addWidget(plot_container)
-        right_splitter.addWidget(side_tabs)
-        right_splitter.setStretchFactor(0, 3)
-        right_splitter.setStretchFactor(1, 1)
+        self.right_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.right_splitter.addWidget(plot_with_toggle)
+        self.right_splitter.addWidget(self.side_tabs)
+        self.right_splitter.setStretchFactor(0, 3)
+        self.right_splitter.setStretchFactor(1, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.parameter_panel)
-        splitter.addWidget(right_splitter)
+        splitter.addWidget(self.right_splitter)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
@@ -134,6 +165,7 @@ class SasModelApp(QMainWindow):
         self.model_info = None
         self.model_parameters = None
         self.load_model_parameters()
+        self._set_side_panel_visible(False)
 
     def generate_infotext(self) -> str:
         """Return the help text shown when a model name is invalid."""
@@ -247,6 +279,17 @@ class SasModelApp(QMainWindow):
         chi_text = f"chi^2_red={chi2:.4g}" if chi2 is not None else None
         self.data_panel.set_chi_square(chi2, dof, points)
         self.plot_manager.plot(Q, I_model, Q_unit, data=overlay_data, chi_square_text=chi_text)
+
+    def _toggle_side_panel(self) -> None:
+        self._set_side_panel_visible(not self.side_tabs.isVisible())
+
+    def _set_side_panel_visible(self, visible: bool) -> None:
+        self.side_tabs.setVisible(visible)
+        self.side_panel_button.setText("▶" if visible else "◀")
+        if visible:
+            self.right_splitter.setSizes([3, 1])
+        else:
+            self.right_splitter.setSizes([1, 0])
 
     def _prepare_overlay_data(
         self, data_bundle: Optional[Any], target_Q_unit: str, target_I_unit: str
