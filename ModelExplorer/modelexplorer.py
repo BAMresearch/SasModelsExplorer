@@ -1,10 +1,9 @@
 # ModelExplorer/modelexplorer.py
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
-import pint
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -32,11 +31,11 @@ from .sasmodels_adapter import (
     load_model_and_info,
     split_magnetic_parameters,
 )
+from .services.fitting_engine import fit_model
+from .types import OverlayData
+from .utils.units import MODEL_INTENSITY_SCALE, create_unit_registry, normalize_unit_label
 
-ureg = pint.UnitRegistry(auto_reduce_dimensions=True)
-ureg.define(r"percent = 0.01 = %")
-ureg.define(r"Ångström = 1e-10*m = Å = Ang = Angstrom")
-ureg.define(r"item = 1")
+ureg = create_unit_registry()
 
 
 class SasModelApp(QMainWindow):
@@ -207,7 +206,7 @@ class SasModelApp(QMainWindow):
         try:
             qmin = float(self.q_min_input.text())
             qmax = float(self.q_max_input.text())
-            qunit = self.q_unit_input.currentText()
+            qunit = normalize_unit_label(self.q_unit_input.currentText())
         except ValueError:
             qmin, qmax = 0.01, 1.0  # Default values in case of error
             qunit = "1/nm"
@@ -251,7 +250,7 @@ class SasModelApp(QMainWindow):
 
     def _prepare_overlay_data(
         self, data_bundle: Optional[Any], target_Q_unit: str, target_I_unit: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[OverlayData]:
         if data_bundle is None:
             return None
         data_I = data_bundle.get("I")
@@ -262,7 +261,7 @@ class SasModelApp(QMainWindow):
         I_copy = self._copy_basedata(data_I)
         Q_copy = self._copy_basedata(data_Q)
 
-        target_Q_unit = target_Q_unit.replace("\u00c5ngstr\u00f6m", "Angstrom").replace("\u00c5", "Angstrom")
+        target_Q_unit = normalize_unit_label(target_Q_unit)
         try:
             Q_copy.to_units(target_Q_unit)
             I_copy.to_units(target_I_unit)
@@ -294,7 +293,7 @@ class SasModelApp(QMainWindow):
             sigma = sigma[order]
 
         label = getattr(data_bundle, "description", None) or "Data"
-        return {"Q": Q_vals, "I": I_vals, "ISigma": sigma, "label": label}
+        return OverlayData(Q=Q_vals, I=I_vals, ISigma=sigma, label=label)
 
     def _copy_basedata(self, source: Any) -> Any:
         uncertainties = {key: np.array(val, copy=True) for key, val in source.uncertainties.items()}
@@ -311,28 +310,25 @@ class SasModelApp(QMainWindow):
         self,
         Q: np.ndarray,
         I: np.ndarray,  # noqa: E741
-        data: Optional[Dict[str, Any]],  # noqa: E741
+        data: Optional[OverlayData],
     ) -> Tuple[Optional[float], Optional[int], Optional[int]]:
         if data is None:
             return None, None, None
-        data_Q = data.get("Q")
-        data_I = data.get("I")
-        data_sigma = data.get("ISigma")
-        if data_Q is None or data_I is None or data_sigma is None:
+        if data.ISigma is None:
             return None, None, None
 
         try:
-            model_I = self._interpolate_model(Q, I, data_Q) * self.plot_manager.scale
+            model_I = self._interpolate_model(Q, I, data.Q) * self.plot_manager.scale
         except Exception:
             return None, None, None
 
-        mask = np.isfinite(model_I) & np.isfinite(data_I) & np.isfinite(data_sigma) & (data_sigma > 0)
+        mask = np.isfinite(model_I) & np.isfinite(data.I) & np.isfinite(data.ISigma) & (data.ISigma > 0)
         if mask.sum() < 2:
             return None, None, None
 
         n_params = len(self.parameter_panel.get_values())
         dof = max(int(mask.sum()) - n_params, 1)
-        chi2 = np.sum(((data_I[mask] - model_I[mask]) / data_sigma[mask]) ** 2) / dof
+        chi2 = np.sum(((data.I[mask] - model_I[mask]) / data.ISigma[mask]) ** 2) / dof
         return float(chi2), dof, int(mask.sum())
 
     def _interpolate_model(self, Q_model: np.ndarray, I_model: np.ndarray, Q_data: np.ndarray) -> np.ndarray:
@@ -348,89 +344,27 @@ class SasModelApp(QMainWindow):
         return 10**log_I_interp
 
     def _run_fit(self) -> None:
-        try:
-            from scipy.optimize import least_squares
-        except Exception:
-            self.fit_panel.set_status("scipy is required for fitting.")
-            return
-
         fit_names = self.fit_panel.get_selected_parameters()
-        if not fit_names:
-            self.fit_panel.set_status("Select parameters to fit.")
-            return
-
         data_bundle = self.data_panel.get_data_bundle()
         overlay_data = self._prepare_overlay_data(data_bundle, self.qunit, self.i_units[0])
         if overlay_data is None:
             self.fit_panel.set_status("Load data before fitting.")
             return
 
-        data_Q = overlay_data.get("Q")
-        data_I = overlay_data.get("I")
-        data_sigma = overlay_data.get("ISigma")
-        if data_Q is None or data_I is None or data_sigma is None:
-            self.fit_panel.set_status("Data uncertainties are required for fitting.")
-            return
-
-        try:
-            kernel = self.model.make_kernel([data_Q * ureg.Quantity(1, self.qunit).to("1/Ang").magnitude])
-        except Exception as exc:
-            self.fit_panel.set_status(f"Kernel error: {exc}")
-            return
-
         parameters = self.parameter_panel.get_values()
         parameters.update(self.hidden_parameter_defaults)
-
-        pd_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
-        for param in pd_params:
-            parameters[param + "_pd_n"] = 35
-
-        x0 = []
-        lower = []
-        upper = []
-        used_names = []
-        for name in fit_names:
-            param_obj = self.parameter_panel.parameters.get(name)
-            if param_obj is None:
-                continue
-            limits = getattr(param_obj, "limits", None) or (-np.inf, np.inf)
-            low, high = float(limits[0]), float(limits[1])
-            value = float(parameters.get(name, param_obj.default))
-            if np.isfinite(low) and value <= low:
-                value = low + 1e-12
-            if np.isfinite(high) and value >= high:
-                value = high - 1e-12
-            used_names.append(name)
-            x0.append(value)
-            lower.append(low)
-            upper.append(high)
-
-        if not used_names:
-            self.fit_panel.set_status("No numeric parameters selected.")
-            return
-
-        x0 = np.array(x0, dtype=float)
-        bounds = (np.array(lower, dtype=float), np.array(upper, dtype=float))
-
-        def residuals(x: np.ndarray) -> np.ndarray:
-            for name, value in zip(used_names, x):
-                parameters[name] = float(value)
-            model_I = compute_intensity(kernel, parameters) * self.plot_manager.scale
-            return (model_I - data_I) / data_sigma
-
         self.fit_panel.set_status("Fitting...")
-        result = least_squares(
-            residuals,
-            x0,
-            bounds=bounds,
+        result = fit_model(
+            model=self.model,
+            model_info=self.model.info,
+            parameters=parameters,
+            fit_names=fit_names,
+            parameter_defs=self.parameter_panel.parameters,
+            data=overlay_data,
+            q_unit=self.qunit,
             max_nfev=self.fit_panel.get_max_iterations(),
+            intensity_scale=MODEL_INTENSITY_SCALE,
         )
 
-        for name, value in zip(used_names, result.x):
-            parameters[name] = float(value)
-
-        self.parameter_panel.set_values(parameters)
-        if result.success:
-            self.fit_panel.set_status("Fit complete.")
-        else:
-            self.fit_panel.set_status(f"Fit stopped: {result.message}")
+        self.parameter_panel.set_values(result.parameters)
+        self.fit_panel.set_status(result.message)

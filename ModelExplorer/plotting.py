@@ -1,9 +1,12 @@
 # ModelExplorer/plotting.py
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+from .types import OverlayData
+from .utils.units import MODEL_INTENSITY_SCALE
 
 
 class PlotManager:
@@ -13,14 +16,14 @@ class PlotManager:
         """Create the figure, axes, and Qt canvas."""
         self.figure, self.ax = plt.subplots(figsize=figsize)
         self.canvas = FigureCanvas(self.figure)
-        self.scale = 100.0
+        self.scale = MODEL_INTENSITY_SCALE
 
     def plot(
         self,
         Q,
         I,  # noqa: E741
         Q_unit: str,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[OverlayData] = None,
         chi_square_text: Optional[str] = None,
     ) -> None:
         """Render the current intensity curve on log-log axes."""
@@ -30,22 +33,17 @@ class PlotManager:
             model_label = f"Model ({chi_square_text})"
         self.ax.plot(Q, I * self.scale, "-", label=model_label)
         if data is not None:
-            data_Q = data.get("Q")
-            data_I = data.get("I")
-            data_sigma = data.get("ISigma")
-            label = data.get("label", "Data")
-            if data_Q is not None and data_I is not None:
-                if data_sigma is not None:
-                    self.ax.errorbar(
-                        data_Q,
-                        data_I,
-                        yerr=data_sigma,
-                        fmt="o",
-                        markersize=3,
-                        label=label,
-                    )
-                else:
-                    self.ax.plot(data_Q, data_I, "o", markersize=3, label=label)
+            if data.ISigma is not None:
+                self.ax.errorbar(
+                    data.Q,
+                    data.I,
+                    yerr=data.ISigma,
+                    fmt="o",
+                    markersize=3,
+                    label=data.label,
+                )
+            else:
+                self.ax.plot(data.Q, data.I, "o", markersize=3, label=data.label)
         self.ax.set_xscale("log")
         self.ax.set_yscale("log")
         self.ax.set_xlabel(f"Q ({Q_unit})")

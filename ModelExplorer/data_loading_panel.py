@@ -2,10 +2,8 @@
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
-import numpy as np
-import yaml
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
@@ -20,6 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .services.data_loader import load_data_bundle
 from .yaml_editor_widget import YAMLEditorWidget
 
 DEFAULT_YAML = """# Units are assumed to be 1/(m sr) for I and 1/nm for Q
@@ -275,16 +274,6 @@ class DataLoadingPanel(QWidget):
             except Exception:
                 pass
 
-    def _read_unit(self, config: Dict[str, Any], *keys: str, default: str) -> str:
-        for key in keys:
-            value = config.get(key)
-            if value:
-                value_str = str(value)
-                value_str = value_str.replace("\u00c5ngstr\u00f6m", "Angstrom")
-                value_str = value_str.replace("\u00c5", "Angstrom")
-                return value_str
-        return default
-
     def _load_data(self) -> None:
         self._clear_message()
         self._data_bundle = None
@@ -305,170 +294,30 @@ class DataLoadingPanel(QWidget):
             self.dataChanged.emit()
             return
 
-        yaml_config = self._parse_yaml_config()
-        if yaml_config is None:
+        yaml_text = self.yaml_editor_widget.yaml_editor.toPlainText()
+        data_kind = self.data_mode_combo.currentData()
+        try:
+            bundle, used_kind, count = load_data_bundle(
+                data_path,
+                data_kind,
+                yaml_text,
+                self._McData1D,
+                self._BaseData,
+                self._DataBundle,
+            )
+        except ValueError as exc:
+            self._set_message(str(exc))
             self.dataChanged.emit()
             return
-
-        self._mds = self._load_mcsas3_data(data_path, yaml_config)
-        if self._mds is None:
-            self.dataChanged.emit()
-            return
-
-        data_df, data_kind = self._select_data_frame(self._mds)
-        if data_df is None or data_kind is None:
-            self._set_message("No data available after loading.")
-            self.dataChanged.emit()
-            return
-
-        arrays = self._extract_data_arrays(data_df)
-        if arrays is None:
-            self.dataChanged.emit()
-            return
-
-        Q, I, sigma, q_sigma = arrays  # noqa: E741
-        if Q.size == 0:
-            self._set_message("No finite data points found.")
-            self.dataChanged.emit()
-            return
-
-        Q_unit = self._read_unit(yaml_config, "Q_unit", "q_unit", default="1/nm")
-        I_unit = self._read_unit(yaml_config, "I_unit", "i_unit", default="1/(m sr)")
-
-        bundle = self._build_data_bundle(Q, I, sigma, q_sigma, Q_unit, I_unit, data_path, data_kind)
-        if bundle is None:
+        except Exception as exc:
+            self._set_message(f"Error loading data: {exc}")
             self.dataChanged.emit()
             return
 
         self._data_bundle = bundle
-        self._set_message(f"Loaded {Q.size} points from {data_kind}.")
+        self._set_message(f"Loaded {count} points from {used_kind}.")
         self._maybe_list_hdf5_paths(data_path)
         self.dataChanged.emit()
-
-    def _parse_yaml_config(self) -> Optional[Dict[str, Any]]:
-        yaml_text = self.yaml_editor_widget.yaml_editor.toPlainText()
-        try:
-            yaml_config = yaml.safe_load(yaml_text) if yaml_text.strip() else {}
-        except yaml.YAMLError as exc:
-            self._set_message(f"YAML error: {exc}")
-            return None
-
-        if yaml_config is None:
-            yaml_config = {}
-        if not isinstance(yaml_config, dict):
-            self._set_message("YAML configuration must be a mapping.")
-            return None
-        return yaml_config
-
-    def _load_mcsas3_data(self, data_path: Path, yaml_config: Dict[str, Any]) -> Optional[Any]:
-        try:
-            return self._McData1D(
-                filename=data_path,
-                nbins=int(yaml_config.get("nbins", 100)),
-                csvargs=yaml_config.get("csvargs", {}) or {},
-                pathDict=yaml_config.get("pathDict", None),
-                IEmin=float(yaml_config.get("IEmin", 0.01)),
-                dataRange=yaml_config.get("dataRange", [-np.inf, np.inf]) or [-np.inf, np.inf],
-                omitQRanges=yaml_config.get("omitQRanges", []) or [],
-                resultIndex=int(yaml_config.get("resultIndex", 1)),
-            )
-        except Exception as exc:
-            self._set_message(f"Error loading data: {exc}")
-            return None
-
-    def _select_data_frame(self, mds: Any) -> Tuple[Optional[Any], Optional[str]]:
-        data_kind = self.data_mode_combo.currentData()
-        data_df = getattr(mds, data_kind, None)
-        if data_df is None or len(data_df) == 0:
-            for fallback in ("binnedData", "clippedData", "rawData"):
-                data_df = getattr(mds, fallback, None)
-                if data_df is not None and len(data_df) > 0:
-                    data_kind = fallback
-                    break
-        if data_df is None or len(data_df) == 0:
-            return None, None
-        return data_df, data_kind
-
-    def _extract_data_arrays(
-        self, data_df: Any
-    ) -> Optional[Tuple[np.ndarray, np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]]:
-        if "Q" not in data_df or "I" not in data_df:
-            self._set_message("Data frame must include 'Q' and 'I' columns.")
-            return None
-
-        Q = np.asarray(data_df["Q"], dtype=float)
-        I = np.asarray(data_df["I"], dtype=float)  # noqa: E741
-
-        sigma = None
-        for key in ("ISigma", "IError", "IStd", "ISEM"):
-            if key in data_df:
-                sigma = np.asarray(data_df[key], dtype=float)
-                break
-
-        q_sigma = None
-        for key in ("QSigma", "QError", "QStd", "QSEM"):
-            if key in data_df:
-                q_sigma = np.asarray(data_df[key], dtype=float)
-                break
-
-        mask = np.isfinite(Q) & np.isfinite(I)
-        if sigma is not None:
-            mask &= np.isfinite(sigma)
-        if q_sigma is not None:
-            mask &= np.isfinite(q_sigma)
-
-        Q = Q[mask]
-        I = I[mask]  # noqa: E741
-        if sigma is not None:
-            sigma = sigma[mask]
-        if q_sigma is not None:
-            q_sigma = q_sigma[mask]
-
-        order = np.argsort(Q)
-        Q = Q[order]
-        I = I[order]  # noqa: E741
-        if sigma is not None:
-            sigma = sigma[order]
-        if q_sigma is not None:
-            q_sigma = q_sigma[order]
-
-        return Q, I, sigma, q_sigma
-
-    def _build_data_bundle(
-        self,
-        Q: np.ndarray,
-        I: np.ndarray,  # noqa: E741
-        sigma: Optional[np.ndarray],
-        q_sigma: Optional[np.ndarray],
-        Q_unit: str,
-        I_unit: str,
-        data_path: Path,
-        data_kind: str,
-    ) -> Optional[Any]:
-        bundle = self._DataBundle()
-        signal_unc = {"ISigma": sigma} if sigma is not None else {}
-        q_unc = {"QSigma": q_sigma} if q_sigma is not None else {}
-
-        try:
-            bundle["I"] = self._BaseData(
-                signal=I,
-                units=I_unit,
-                uncertainties=signal_unc,
-                rank_of_data=1,
-            )
-            bundle["Q"] = self._BaseData(
-                signal=Q,
-                units=Q_unit,
-                uncertainties=q_unc,
-                rank_of_data=1,
-            )
-        except Exception as exc:
-            self._set_message(f"Error creating MoDaCor data bundle: {exc}")
-            return None
-
-        bundle.default_plot = "I"
-        bundle.description = f"{data_path.name} ({data_kind})"
-        return bundle
 
     def _maybe_list_hdf5_paths(self, data_path: Path) -> None:
         if data_path.suffix.lower() not in {".h5", ".hdf5", ".nxs", ".nx"}:
