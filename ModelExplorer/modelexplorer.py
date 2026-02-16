@@ -179,69 +179,82 @@ class SasModelApp(QMainWindow):
         if self.parameter_panel is not None:
             previous_values = self.parameter_panel.get_values()
             previous_values.update(self.hidden_parameter_defaults)
+
         previous_fit_selection = self.fit_panel.get_selected_parameters()
-        model_name = self.model_input.text()
+        model_name = self.model_input.text().strip()
+
         try:
-            # Load model info from sasmodels
-            self.model, self.model_info = load_model_and_info(model_name)
+            # Attempt model load
+            model, model_info = load_model_and_info(model_name)
+
+            # Only update state after successful load
+            self.model = model
+            self.model_info = model_info
             self.model_parameters = self.model_info.parameters.defaults.copy()
 
             parameters = build_parameter_list(self.model, self.model_info, self.pd_types)
             visible_parameters, hidden_defaults = split_magnetic_parameters(
-                parameters, self.show_magnetic_checkbox.isChecked()
+                parameters,
+                self.show_magnetic_checkbox.isChecked(),
             )
+
+            # Preserve previous values where possible
             for name in hidden_defaults:
                 if name in previous_values:
                     hidden_defaults[name] = previous_values[name]
+
             self.hidden_parameter_defaults = hidden_defaults
+
             self.parameter_panel.set_parameters(visible_parameters)
             self.parameter_panel.set_values(
                 {name: value for name, value in previous_values.items() if name in self.parameter_panel.parameters},
                 emit_change=False,
             )
+
             self.fit_panel.set_parameters(self.parameter_panel.parameters)
             self.fit_panel.set_selected_parameters(previous_fit_selection)
-            # Initial plot
+
+            # Build kernel + refresh plot
             self.update_model_and_plot()
 
         except Exception as e:
-            logging.warning(f"Error loading model '{model_name}': {e}")
+            logging.warning(f"Error loading model '{model_name}': {e}", exc_info=True)
+
+            # Reset state to avoid poisoned session
+            self.model = None
+            self.model_info = None
+            self.kernel = None
             self.hidden_parameter_defaults = {}
 
+            # ---------- Error Dialog ----------
             dialog = QDialog(self)
-            dialog.setWindowTitle("Available Models")
+            dialog.setWindowTitle("Invalid Model Name")
 
             layout = QVBoxLayout(dialog)
 
-            text = QTextEdit()
-            text.setReadOnly(True)
-            text.setPlainText(self.infoText)
+            # Error label at top
+            error_text = QTextEdit()
+            error_text.setReadOnly(True)
+            error_text.setMaximumHeight(80)
+            error_text.setPlainText(f"Could not load model '{model_name}'.\n\n{type(e).__name__}: {e}")
+            layout.addWidget(error_text)
+
+            # Available models list (monospaced + scrollable)
+            model_list = QTextEdit()
+            model_list.setReadOnly(True)
+            model_list.setPlainText(self.infoText)
 
             fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-            text.setFont(fixed_font)
+            model_list.setFont(fixed_font)
+            # increase font size:
+            font = model_list.font()
+            font.setPointSize(font.pointSize() + 2)
+            model_list.setFont(font)
 
-            layout.addWidget(text)
-            dialog.resize(800, 500)
-            # old version
-            # let's create a dialog box to inform the user of the error
-            # Create a custom font
-            # ---------------------
-            # font = QFont()
-            # font.setFamily("Courier")
-            # font.setPointSize(9)
-            # dialog = QMessageBox(self)
-            # dialog.setWindowTitle("Invalid model")
-            # dialog.setText(f"Could not load model '{model_name}': {e}")
-            # dialog.setIcon(QMessageBox.Icon.Warning)
-            # dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-            # dialog.setInformativeText(self.infoText)
+            layout.addWidget(model_list)
 
-            dialog.exec()  # button =
-            # if button:
-            #     dialog.close()
-            # else:
-            #     dialog.close()
-            # if button == QMessageBox.Help:
+            dialog.resize(900, 550)
+            dialog.exec()
 
     def update_model_and_plot(self) -> None:
         """Rebuild the kernel (if needed) and refresh the plot."""
