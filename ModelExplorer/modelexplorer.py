@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from .data_loading_panel import DataLoadingPanel
 from .fitting_panel import FittingPanel
+from .modelbrowser import ModelBrowser
 from .parameter_panel import ParameterPanel
 from .plotting import PlotManager
 from .sasmodels_adapter import (
@@ -69,8 +70,17 @@ class SasModelApp(QMainWindow):
 
         # Text input for model
         self.model_input = QLineEdit(modelName)
+        self.model_browse_button = QPushButton("...")
+        self.model_browse_button.setFixedWidth(50)
+        self.model_browse_button.clicked.connect(self.open_model_browser)
         self.model_input.setFixedWidth(300)
-        self.parameter_panel.add_header_row("Model:", self.model_input)
+        model_row = QWidget()
+        model_layout = QHBoxLayout(model_row)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.addWidget(self.model_input)
+        model_layout.addWidget(self.model_browse_button)
+
+        self.parameter_panel.add_header_row("Model:", model_row)
         self.model_input.returnPressed.connect(self.load_model_parameters)
         self.show_magnetic_checkbox = QCheckBox("Show")
         self.show_magnetic_checkbox.setChecked(False)
@@ -85,7 +95,7 @@ class SasModelApp(QMainWindow):
 
         # qmin and qmax inputs below the plot
         self.q_min_input = QLineEdit("0.01")
-        self.q_max_input = QLineEdit("1.0")
+        self.q_max_input = QLineEdit("10.0")
         self.q_min_input.setFixedWidth(80)
         self.q_max_input.setFixedWidth(80)
         self.q_min_input.editingFinished.connect(self.update_kernel_and_plot)
@@ -168,6 +178,63 @@ class SasModelApp(QMainWindow):
         self.model_parameters = None
         self.load_model_parameters()
         self._set_side_panel_visible(False)
+
+    def open_model_browser(self):
+        if not hasattr(self, "_model_browser"):
+            self._model_browser = ModelBrowser(parent=self)
+            self._model_browser.model_selected.connect(self.append_model_text)
+
+        self._model_browser.show()
+        self._model_browser.raise_()
+        self._model_browser.activateWindow()
+
+    # only one structure factro per form factor allowed...
+    def append_model_text(self, model_name: str, is_structure: bool = False):
+        current = self.model_input.text().strip()
+
+        if not current:
+            new = model_name
+
+        else:
+            if is_structure:
+                if "@" in current:
+                    # Replace existing structure factor
+                    before_at = current.split("@")[0]
+                    # Preserve anything after structure factor additions (e.g. +porod)
+                    if "+" in current.split("@")[1]:
+                        after_sf = current.split("@")[1]
+                        remainder = ""
+                        if "+" in after_sf:
+                            remainder = "+" + "+".join(after_sf.split("+")[1:])
+                        new = f"{before_at}@{model_name}{remainder}"
+                    else:
+                        new = f"{before_at}@{model_name}"
+                else:
+                    new = f"{current}@{model_name}"
+            else:
+                new = f"{current}+{model_name}"
+
+        self.model_input.setText(new)
+
+        # Auto-load
+        self.load_model_parameters()
+
+    # non-filtering on structure factors:
+    # def append_model_text(self, model_name: str, is_structure: bool = False):
+    #     current = self.model_input.text().strip()
+
+    #     if not current:
+    #         new = model_name
+    #     else:
+    #         if is_structure:
+    #             new = f"{current}@{model_name}"
+    #         else:
+    #             new = f"{current}+{model_name}"
+
+    #     self.model_input.setText(new)
+
+    #     # Immediately load model after insertion
+    #     self.load_model_parameters()
 
     def generate_infotext(self) -> str:
         """Return the help text shown when a model name is invalid."""
