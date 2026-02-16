@@ -5,10 +5,11 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -171,7 +173,7 @@ class SasModelApp(QMainWindow):
         """Return the help text shown when a model name is invalid."""
         return generate_model_info_text()
 
-    def load_model_parameters(self) -> None:
+    def load_model_parameters(self, *_) -> None:
         """Load model info, rebuild parameter controls, and trigger a plot refresh."""
         previous_values = {}
         if self.parameter_panel is not None:
@@ -206,25 +208,39 @@ class SasModelApp(QMainWindow):
             logging.warning(f"Error loading model '{model_name}': {e}")
             self.hidden_parameter_defaults = {}
 
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Available Models")
+
+            layout = QVBoxLayout(dialog)
+
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setPlainText(self.infoText)
+
+            fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+            text.setFont(fixed_font)
+
+            layout.addWidget(text)
+            dialog.resize(800, 500)
+            # old version
             # let's create a dialog box to inform the user of the error
             # Create a custom font
             # ---------------------
-            font = QFont()
-            font.setFamily("Courier")
-            font.setPointSize(9)
+            # font = QFont()
+            # font.setFamily("Courier")
+            # font.setPointSize(9)
+            # dialog = QMessageBox(self)
+            # dialog.setWindowTitle("Invalid model")
+            # dialog.setText(f"Could not load model '{model_name}': {e}")
+            # dialog.setIcon(QMessageBox.Icon.Warning)
+            # dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+            # dialog.setInformativeText(self.infoText)
 
-            dialog = QMessageBox(self)
-            dialog.setWindowTitle("Invalid model")
-            dialog.setText(f"Could not load model '{model_name}': {e}")
-            dialog.setIcon(QMessageBox.Warning)
-            dialog.setStandardButtons(QMessageBox.Ok)
-            dialog.setInformativeText(self.infoText)
-
-            button = dialog.exec()
-            if button:
-                dialog.close()
-            else:
-                dialog.close()
+            dialog.exec()  # button =
+            # if button:
+            #     dialog.close()
+            # else:
+            #     dialog.close()
             # if button == QMessageBox.Help:
 
     def update_model_and_plot(self) -> None:
@@ -234,6 +250,8 @@ class SasModelApp(QMainWindow):
     def update_kernel_and_plot(self) -> None:
         """Update the sasmodels kernel using the current q range/units."""
         # Retrieve and validate q range and units
+        if self.model is None:
+            return
         logging.info("updating kernel")
         try:
             qmin = float(self.q_min_input.text())
@@ -246,11 +264,16 @@ class SasModelApp(QMainWindow):
         # Prepare parameters for sasmodel
         self.q = np.geomspace(qmin, qmax, 250)
         self.qunit = qunit
+
         self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to("1/Ang").magnitude])
         self.update_plot()
 
     def update_plot(self) -> None:
         """Compute intensity from current parameters and redraw the plot."""
+
+        if self.model is None:
+            return
+
         logging.info("updating plot")
 
         parameters = self.parameter_panel.get_values()
@@ -387,6 +410,8 @@ class SasModelApp(QMainWindow):
         return 10**log_I_interp
 
     def _run_fit(self) -> None:
+        if self.model is None:
+            return
         fit_names = self.fit_panel.get_selected_parameters()
         data_bundle = self.data_panel.get_data_bundle()
         overlay_data = self._prepare_overlay_data(data_bundle, self.qunit, self.i_units[0])
