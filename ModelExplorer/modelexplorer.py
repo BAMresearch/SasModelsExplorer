@@ -70,15 +70,11 @@ class SasModelApp(QMainWindow):
 
         # Text input for model
         self.model_input = QLineEdit(modelName)
-        self.model_browse_button = QPushButton("...")
-        self.model_browse_button.setFixedWidth(50)
-        self.model_browse_button.clicked.connect(self.open_model_browser)
         self.model_input.setFixedWidth(300)
         model_row = QWidget()
         model_layout = QHBoxLayout(model_row)
         model_layout.setContentsMargins(0, 0, 0, 0)
         model_layout.addWidget(self.model_input)
-        model_layout.addWidget(self.model_browse_button)
 
         self.parameter_panel.add_header_row("Model:", model_row)
         self.model_input.returnPressed.connect(self.load_model_parameters)
@@ -154,7 +150,12 @@ class SasModelApp(QMainWindow):
         self.fit_panel = FittingPanel()
         self.fit_panel.fitRequested.connect(self._run_fit)
 
+        # Model browser (now embedded as a tab)
+        self.model_browser = ModelBrowser(parent=self)
+        self.model_browser.model_selected.connect(self.append_model_text)
+
         self.side_tabs = QTabWidget()
+        self.side_tabs.addTab(self.model_browser, "Models")
         self.side_tabs.addTab(self.data_panel, "Data")
         self.side_tabs.addTab(self.fit_panel, "Fitting")
         self.side_tabs.setMinimumWidth(320)
@@ -178,15 +179,6 @@ class SasModelApp(QMainWindow):
         self.model_parameters = None
         self.load_model_parameters()
         self._set_side_panel_visible(False)
-
-    def open_model_browser(self):
-        if not hasattr(self, "_model_browser"):
-            self._model_browser = ModelBrowser(parent=self)
-            self._model_browser.model_selected.connect(self.append_model_text)
-
-        self._model_browser.show()
-        self._model_browser.raise_()
-        self._model_browser.activateWindow()
 
     # only one structure factro per form factor allowed...
     def append_model_text(self, model_name: str, is_structure: bool = False):
@@ -218,23 +210,6 @@ class SasModelApp(QMainWindow):
 
         # Auto-load
         self.load_model_parameters()
-
-    # non-filtering on structure factors:
-    # def append_model_text(self, model_name: str, is_structure: bool = False):
-    #     current = self.model_input.text().strip()
-
-    #     if not current:
-    #         new = model_name
-    #     else:
-    #         if is_structure:
-    #             new = f"{current}@{model_name}"
-    #         else:
-    #             new = f"{current}+{model_name}"
-
-    #     self.model_input.setText(new)
-
-    #     # Immediately load model after insertion
-    #     self.load_model_parameters()
 
     def generate_infotext(self) -> str:
         """Return the help text shown when a model name is invalid."""
@@ -292,6 +267,8 @@ class SasModelApp(QMainWindow):
             self.model_info = None
             self.kernel = None
             self.hidden_parameter_defaults = {}
+            self._set_side_panel_visible(True)
+            self.side_tabs.setCurrentWidget(self.model_browser)
 
             # ---------- Error Dialog ----------
             dialog = QDialog(self)
