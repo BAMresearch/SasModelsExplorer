@@ -185,30 +185,33 @@ class SasModelApp(QMainWindow):
         current = self.model_input.text().strip()
 
         if not current:
-            new = model_name
+            # First model
+            self.model_input.setText(model_name)
+            self.load_model_parameters()
+            return
+
+        # Split into additive terms
+        terms = current.split("+")
+
+        if is_structure:
+            # Apply to last term only
+            last_term = terms[-1]
+
+            if "@" in last_term:
+                # Replace structure factor
+                base, _ = last_term.split("@", 1)
+                terms[-1] = f"{base}@{model_name}"
+            else:
+                # Add structure factor to last term
+                terms[-1] = f"{last_term}@{model_name}"
 
         else:
-            if is_structure:
-                if "@" in current:
-                    # Replace existing structure factor
-                    before_at = current.split("@")[0]
-                    # Preserve anything after structure factor additions (e.g. +porod)
-                    if "+" in current.split("@")[1]:
-                        after_sf = current.split("@")[1]
-                        remainder = ""
-                        if "+" in after_sf:
-                            remainder = "+" + "+".join(after_sf.split("+")[1:])
-                        new = f"{before_at}@{model_name}{remainder}"
-                    else:
-                        new = f"{before_at}@{model_name}"
-                else:
-                    new = f"{current}@{model_name}"
-            else:
-                new = f"{current}+{model_name}"
+            # Add new form factor as new term
+            terms.append(model_name)
 
-        self.model_input.setText(new)
+        new_expression = "+".join(terms)
 
-        # Auto-load
+        self.model_input.setText(new_expression)
         self.load_model_parameters()
 
     def generate_infotext(self) -> str:
