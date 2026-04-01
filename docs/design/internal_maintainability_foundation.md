@@ -84,11 +84,12 @@ reworking core state extraction.
 
 ## Follow-Up (Optional)
 
-`modelexplorer.py` is now part of the mypy gate and uses typed state/protocol helpers for HDF5 IO.
+`modelexplorer.py` is now part of the mypy gate and delegates HDF5 read/write orchestration to
+`services/hdf5_state_io.py`.
 
 Recommended next cleanup:
 
-1. Move remaining HDF5 read/write orchestration from `modelexplorer.py` to a dedicated typed persistence service.
+1. Add direct unit tests for `services/hdf5_state_io.py` so persistence logic is covered independently from QWidget stubs.
 
 ## Checklist for Future Developers
 

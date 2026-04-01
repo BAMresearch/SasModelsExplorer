@@ -94,10 +94,7 @@ class _FakeApp:
     _dataset_text = staticmethod(SasModelApp._dataset_text)
     _dataset_float = staticmethod(SasModelApp._dataset_float)
 
-    _write_model_group = SasModelApp._write_model_group
-    _write_parameters_group = SasModelApp._write_parameters_group
-    _write_data_group = SasModelApp._write_data_group
-    _write_settings_group = SasModelApp._write_settings_group
+    _build_state_write_context = SasModelApp._build_state_write_context
     _write_state_hdf5_tree = SasModelApp._write_state_hdf5_tree
 
     _read_state_hdf5 = SasModelApp._read_state_hdf5
