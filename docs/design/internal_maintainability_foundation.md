@@ -86,10 +86,11 @@ reworking core state extraction.
 
 `modelexplorer.py` is now part of the mypy gate and delegates HDF5 read/write orchestration to
 `services/hdf5_state_io.py`.
+Direct service-level tests now cover this module in `tests/test_hdf5_state_io.py`.
 
 Recommended next cleanup:
 
-1. Add direct unit tests for `services/hdf5_state_io.py` so persistence logic is covered independently from QWidget stubs.
+1. Expand `hdf5_state_io` tests with malformed/missing stage datasets and mixed dtype edge cases.
 
 ## Checklist for Future Developers
 
