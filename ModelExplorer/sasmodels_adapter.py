@@ -19,8 +19,11 @@ class SupportsModelInfo(Protocol):
 
     info: sasmodels.modelinfo.ModelInfo
 
+    def make_kernel(self, data: list[NDArray[np.float64]]) -> object:
+        """Create a sasmodels kernel for the provided Q-array payload."""
 
-def load_model_and_info(model_name: str) -> tuple[object, sasmodels.modelinfo.ModelInfo]:
+
+def load_model_and_info(model_name: str) -> tuple[SupportsModelInfo, sasmodels.modelinfo.ModelInfo]:
     """Load a sasmodels model and its corresponding ``ModelInfo``."""
 
     model = sasmodels.core.load_model(model_name)

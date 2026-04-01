@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -57,7 +59,7 @@ class FittingPanel(QWidget):
         layout.addStretch(1)
         self.setLayout(layout)
 
-    def set_parameters(self, parameters: dict[str, object]) -> None:
+    def set_parameters(self, parameters: Mapping[str, object]) -> None:
         """Rebuild the checkbox list for currently visible numeric parameters."""
 
         for checkbox in self._checkboxes.values():

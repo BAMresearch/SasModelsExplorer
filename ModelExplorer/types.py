@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 FloatArray: TypeAlias = NDArray[np.float64]
-ParameterValue: TypeAlias = float | int | str
+ParameterValue: TypeAlias = float | int | str | bool
 ParameterMapping: TypeAlias = dict[str, ParameterValue]
 MetadataValue: TypeAlias = str | int | float | bool
 MetadataMapping: TypeAlias = dict[str, MetadataValue]

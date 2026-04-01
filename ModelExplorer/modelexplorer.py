@@ -3,9 +3,13 @@
 import csv
 import json
 import logging
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, TypeAlias, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import (
@@ -34,12 +38,14 @@ from .modelbrowser import ModelBrowser
 from .parameter_panel import ParameterPanel
 from .plotting import PlotManager
 from .sasmodels_adapter import (
+    SupportsModelInfo,
     build_parameter_list,
     compute_intensity,
     generate_model_info_text,
     load_model_and_info,
     split_magnetic_parameters,
 )
+from .services.export_contracts import ExportSnapshot
 from .services.export_snapshot_builder import (
     SnapshotInputs,
     build_csv_model_parameter_table,
@@ -49,31 +55,163 @@ from .services.export_snapshot_builder import (
 )
 from .services.fitting_engine import fit_model
 from .services.model_parameters import ensure_pd_parameter_defaults, merge_parameter_values
-from .services.overlay_processing import overlay_from_bundle, reduced_chi_square
+from .services.overlay_processing import BaseDataLike, overlay_from_bundle, reduced_chi_square
 from .services.run_config_export import build_mcsas3_run_configuration
-from .types import DataSelectionState, ModelSessionState
+from .types import DataSelectionState, ModelSessionState, ParameterMapping, ParameterValue
 from .utils.units import MODEL_INTENSITY_SCALE, create_unit_registry, normalize_unit_label
 
 ureg = create_unit_registry()
 
 
+class H5DatasetLike(Protocol):
+    """Minimal HDF5 dataset surface used by save/load helpers."""
+
+    attrs: "H5AttrsLike"
+
+    def __getitem__(self, key: object) -> object:
+        """Return dataset contents for key/index payloads."""
+
+
+class H5AttrsLike(Protocol):
+    """Minimal mapping-like surface of HDF5 attributes."""
+
+    def get(self, key: str, default: object | None = None) -> object:
+        """Return attribute value with fallback default."""
+
+    def __contains__(self, key: object) -> bool:
+        """Return whether an attribute key exists."""
+
+    def __setitem__(self, key: str, value: object) -> None:
+        """Set an attribute key/value pair."""
+
+
+class H5GroupLike(Protocol):
+    """Minimal HDF5 group/file surface used by save/load helpers."""
+
+    attrs: H5AttrsLike
+
+    def create_group(self, name: str) -> "H5GroupLike":
+        """Create and return a nested group."""
+
+    def create_dataset(
+        self,
+        name: str,
+        data: object,
+        dtype: object | None = None,
+    ) -> H5DatasetLike:
+        """Create and return a dataset."""
+
+    def get(self, name: str) -> object | None:
+        """Return nested node by key, or ``None`` when missing."""
+
+    def __getitem__(self, key: str) -> object:
+        """Return a nested node by key."""
+
+    def __contains__(self, key: object) -> bool:
+        """Return whether a key exists."""
+
+    def keys(self) -> Iterable[str]:
+        """Return group keys."""
+
+
+class BaseDataFactory(Protocol):
+    """Callable factory protocol for constructing BaseData-like payloads."""
+
+    def __call__(
+        self,
+        *,
+        signal: object,
+        units: str,
+        uncertainties: Mapping[str, object] | None = None,
+    ) -> BaseDataLike:
+        """Build a BaseData-like object."""
+
+
+class DataBundleLike(Protocol):
+    """Mapping-like DataBundle with writable description."""
+
+    description: str
+
+    def __getitem__(self, key: str) -> BaseDataLike:
+        """Return entry by key."""
+
+    def __iter__(self) -> Iterable[str]:
+        """Iterate over available keys."""
+
+    def __len__(self) -> int:
+        """Return number of keys."""
+
+    def get(self, key: str, default: BaseDataLike | None = None) -> BaseDataLike | None:
+        """Return entry by key with fallback default."""
+
+
+class DataBundleFactory(Protocol):
+    """Callable factory protocol for constructing DataBundle-like payloads."""
+
+    def __call__(self, values: Mapping[str, BaseDataLike]) -> DataBundleLike:
+        """Build a DataBundle-like mapping."""
+
+
+class FrameLike(Protocol):
+    """Minimal dataframe-like protocol used for HDF5 stage export."""
+
+    columns: Iterable[str]
+
+    def __getitem__(self, key: str) -> object:
+        """Return the selected column payload."""
+
+
+StageBundleMap: TypeAlias = dict[str, DataBundleLike]
+
+
+@dataclass(slots=True)
+class LoadedExplorerState:
+    """Typed state payload loaded from an explorer HDF5 file."""
+
+    model_expression: str
+    q_unit: str
+    intensity_unit: str
+    q_min: float
+    q_max: float
+    parameters: ParameterMapping
+    hidden_defaults: ParameterMapping
+    fit_names: list[str]
+    source_file: str
+    stage_name: str
+    yaml_text: str
+    yaml_preset: str
+    stage_bundles: StageBundleMap
+
+    def __getitem__(self, key: str) -> object:
+        """Provide backward-compatible dict-like state access by key."""
+
+        return getattr(self, key)
+
+    def get(self, key: str, default: object | None = None) -> object | None:
+        """Provide backward-compatible ``dict.get`` style state access."""
+
+        return getattr(self, key, default)
+
+
 class SasModelApp(QMainWindow):
     """Main PyQt window that wires model inputs, parameter panel, and plotting."""
 
-    q: np.ndarray = None
-    model = None
-    kernel = None
-    model_info = None
-    model_parameters = None
     pd_types: list[str] = ["uniform", "rectangle", "gaussian", "lognormal", "schulz", "boltzmann"]
     q_units: list[str] = ["1/nm", "1/Ångström", "1/m"]
     i_units: list[str] = ["1/(m sr)", "1/(cm sr)"]
-    qunit: str = None
-    infoText: str = None
 
     def __init__(self, modelName: str = "sphere") -> None:
         """Initialize the UI, wire signals, and load the initial model."""
         super().__init__()
+        self.q: NDArray[np.float64] = np.geomspace(0.01, 1.0, 250)
+        self.model: SupportsModelInfo | None = None
+        self.kernel: object | None = None
+        self.model_info: object | None = None
+        self.model_parameters: Mapping[str, object] | None = None
+        self.qunit: str = normalize_unit_label(self.q_units[0])
+        self.infoText: str = ""
+        self.hidden_parameter_defaults: ParameterMapping = {}
+
         self.setWindowTitle("SasModels Explorer")
         self.resize(1440, 720)
 
@@ -97,7 +235,6 @@ class SasModelApp(QMainWindow):
         self.show_magnetic_checkbox.setChecked(False)
         self.show_magnetic_checkbox.stateChanged.connect(self.load_model_parameters)
         self.parameter_panel.add_header_row("Magnetic:", self.show_magnetic_checkbox)
-        self.hidden_parameter_defaults = {}
 
         # Right layout for plot
         self.plot_manager = PlotManager(figsize=(6, 4))
@@ -239,9 +376,9 @@ class SasModelApp(QMainWindow):
         """Return the help text shown when a model name is invalid."""
         return generate_model_info_text()
 
-    def load_model_parameters(self, *_) -> None:
+    def load_model_parameters(self, *_: object) -> None:
         """Load model info, rebuild parameter controls, and trigger a plot refresh."""
-        previous_values = {}
+        previous_values: ParameterMapping = {}
         if self.parameter_panel is not None:
             previous_values = self.parameter_panel.get_values()
             previous_values.update(self.hidden_parameter_defaults)
@@ -256,7 +393,7 @@ class SasModelApp(QMainWindow):
             # Only update state after successful load
             self.model = model
             self.model_info = model_info
-            self.model_parameters = self.model_info.parameters.defaults.copy()
+            self.model_parameters = model_info.parameters.defaults.copy()
 
             parameters = build_parameter_list(self.model, self.model_info, self.pd_types)
             visible_parameters, hidden_defaults = split_magnetic_parameters(
@@ -346,13 +483,14 @@ class SasModelApp(QMainWindow):
         self.q = np.geomspace(qmin, qmax, 250)
         self.qunit = qunit
 
-        self.kernel = self.model.make_kernel([self.q * ureg.Quantity(1, qunit).to("1/Ang").magnitude])
+        kernel_q = np.asarray(self.q * ureg.Quantity(1, qunit).to("1/Ang").magnitude, dtype=float)
+        self.kernel = self.model.make_kernel([kernel_q])
         self.update_plot()
 
     def update_plot(self) -> None:
         """Compute intensity from current parameters and redraw the plot."""
 
-        if self.model is None:
+        if self.model is None or self.kernel is None:
             return
 
         logging.info("updating plot")
@@ -366,7 +504,7 @@ class SasModelApp(QMainWindow):
         logging.info("calling sasmodels with %s parameters", len(parameters))
         I_model = compute_intensity(kernel, parameters)
 
-        data_bundle = self.data_panel.get_data_bundle()
+        data_bundle = cast(Mapping[str, BaseDataLike] | None, self.data_panel.get_data_bundle())
         overlay_data = overlay_from_bundle(data_bundle, Q_unit, self.i_units[0])
         chi2, dof, points = reduced_chi_square(
             np.asarray(Q, dtype=float),
@@ -394,7 +532,7 @@ class SasModelApp(QMainWindow):
         if self.model is None:
             return
         fit_names = self.fit_panel.get_selected_parameters()
-        data_bundle = self.data_panel.get_data_bundle()
+        data_bundle = cast(Mapping[str, BaseDataLike] | None, self.data_panel.get_data_bundle())
         overlay_data = overlay_from_bundle(data_bundle, self.qunit, self.i_units[0])
         if overlay_data is None:
             self.fit_panel.set_status("Load data before fitting.")
@@ -417,11 +555,14 @@ class SasModelApp(QMainWindow):
         self.parameter_panel.set_values(result.parameters)
         self.fit_panel.set_status(result.message)
 
-    def _current_parameter_values(self) -> dict[str, float | int | str]:
+    def _current_parameter_values(self) -> ParameterMapping:
         """Return merged visible+hidden model parameters with required PD helper keys."""
 
         parameters = merge_parameter_values(self.parameter_panel.get_values(), self.hidden_parameter_defaults)
-        ensure_pd_parameter_defaults(parameters, getattr(self.model.info.parameters, "pd_1d", []))
+        if self.model is None:
+            return parameters
+        pd_names = list(getattr(self.model.info.parameters, "pd_1d", []))
+        ensure_pd_parameter_defaults(parameters, pd_names)
         return parameters
 
     def _set_q_unit_selection(self, target_q_unit: str) -> None:
@@ -434,7 +575,7 @@ class SasModelApp(QMainWindow):
                 self.q_unit_input.setCurrentIndex(index)
                 return
 
-    def _float_parameter_limits(self, parameters: dict[str, float | int | str]) -> dict[str, tuple[float, float]]:
+    def _float_parameter_limits(self, parameters: ParameterMapping) -> dict[str, tuple[float, float]]:
         """Return numeric parameter names and effective slider limits for run-config export."""
 
         limits: dict[str, tuple[float, float]] = {}
@@ -470,7 +611,7 @@ class SasModelApp(QMainWindow):
         return units, None, None
 
     @staticmethod
-    def _dataset_scalar_to_python(value: object) -> float | int | bool | str:
+    def _dataset_scalar_to_python(value: object) -> ParameterValue:
         """Normalize HDF5 scalar payload values to Python scalars."""
 
         if isinstance(value, np.generic):
@@ -482,13 +623,25 @@ class SasModelApp(QMainWindow):
         return str(value)
 
     @staticmethod
-    def _dataset_text(group: object | None, name: str, default: str = "") -> str:
+    def _dataset_from_group(group: H5GroupLike | None, name: str) -> H5DatasetLike | None:
+        """Return a named dataset from a group, or ``None`` when missing."""
+
+        if group is None:
+            return None
+        node = group.get(name)
+        if node is None:
+            return None
+        return cast(H5DatasetLike, node)
+
+    @classmethod
+    def _dataset_text(cls, group: H5GroupLike | None, name: str, default: str = "") -> str:
         """Read a string-like dataset value from a group with fallback default."""
 
-        if group is None or name not in group:
+        dataset = cls._dataset_from_group(group, name)
+        if dataset is None:
             return default
         try:
-            raw = group[name][()]
+            raw = dataset[()]
         except Exception:
             return default
         if isinstance(raw, np.ndarray) and raw.shape == ():
@@ -497,27 +650,56 @@ class SasModelApp(QMainWindow):
             return raw.decode("utf-8")
         return str(raw)
 
-    @staticmethod
-    def _dataset_float(group: object | None, name: str, default: float) -> float:
+    @classmethod
+    def _dataset_float(cls, group: H5GroupLike | None, name: str, default: float) -> float:
         """Read a float dataset value with fallback default."""
 
-        if group is None or name not in group:
+        dataset = cls._dataset_from_group(group, name)
+        if dataset is None:
             return default
         try:
-            return float(group[name][()])
+            return float(cls._dataset_scalar_to_python(dataset[()]))
         except Exception:
             return default
 
-    def _write_model_group(self, sme_group: object, snapshot: object) -> None:
+    @classmethod
+    def _parse_parameter_json(cls, payload: str) -> ParameterMapping:
+        """Parse JSON mapping payload and coerce values to export-safe scalars."""
+
+        try:
+            raw = json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+
+        parsed: ParameterMapping = {}
+        for key, value in raw.items():
+            parsed[str(key)] = cls._dataset_scalar_to_python(value)
+        return parsed
+
+    @staticmethod
+    def _parse_string_list_json(payload: str) -> list[str]:
+        """Parse a JSON list payload into a list of strings."""
+
+        try:
+            raw = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(raw, list):
+            return []
+        return [str(item) for item in raw]
+
+    def _write_model_group(self, sme_group: H5GroupLike, snapshot: ExportSnapshot) -> None:
         """Write model Q/I datasets with dataset-level units metadata."""
 
         model_group = sme_group.create_group("model")
-        model_q_ds = model_group.create_dataset("Q", data=np.asarray(snapshot.q_values, dtype=float))
-        model_i_ds = model_group.create_dataset("I", data=np.asarray(snapshot.model_intensity, dtype=float))
+        model_q_ds = model_group.create_dataset("Q", data=np.array(snapshot.q_values, copy=True, dtype=float))
+        model_i_ds = model_group.create_dataset("I", data=np.array(snapshot.model_intensity, copy=True, dtype=float))
         model_q_ds.attrs["units"] = snapshot.q_unit
         model_i_ds.attrs["units"] = snapshot.intensity_unit
 
-    def _write_parameters_group(self, sme_group: object, snapshot: object, text_dtype: object) -> None:
+    def _write_parameters_group(self, sme_group: H5GroupLike, snapshot: ExportSnapshot, text_dtype: object) -> None:
         """Write parameter datasets with units and optional min/max attrs."""
 
         parameters_group = sme_group.create_group("parameters")
@@ -534,25 +716,33 @@ class SasModelApp(QMainWindow):
             if max_val is not None:
                 ds.attrs["max"] = float(max_val)
 
-    def _write_data_group(self, sme_group: object, snapshot: object, text_dtype: object) -> None:
+    def _write_data_group(self, sme_group: H5GroupLike, snapshot: ExportSnapshot, text_dtype: object) -> None:
         """Write all loaded stage dataframes with units/uncertainty metadata."""
 
         data_group = sme_group.create_group("data")
         stage_bundles = self.data_panel.get_stage_bundles()
         stage_frames = self.data_panel.get_stage_frames()
 
-        for stage_name, frame in sorted(stage_frames.items()):
+        for stage_name, frame_obj in sorted(stage_frames.items()):
+            frame = cast(FrameLike, frame_obj)
             stage_group = data_group.create_group(stage_name)
             stage_q_unit = snapshot.q_unit
             stage_i_unit = snapshot.intensity_unit
-            stage_bundle = stage_bundles.get(stage_name)
-            if stage_bundle is not None:
+            stage_bundle_obj = stage_bundles.get(stage_name)
+            if stage_bundle_obj is not None:
+                stage_bundle = cast(Mapping[str, BaseDataLike], stage_bundle_obj)
                 try:
-                    stage_q_unit = str(getattr(stage_bundle["Q"], "units", stage_q_unit))
+                    q_node = stage_bundle.get("Q")
+                    if q_node is not None:
+                        stage_q_unit = str(getattr(q_node, "units", stage_q_unit))
                 except Exception:
                     pass
                 try:
-                    stage_i_unit = str(getattr(stage_bundle["signal"], "units", stage_i_unit))
+                    i_node = stage_bundle.get("signal")
+                    if i_node is None:
+                        i_node = stage_bundle.get("I")
+                    if i_node is not None:
+                        stage_i_unit = str(getattr(i_node, "units", stage_i_unit))
                 except Exception:
                     pass
 
@@ -570,16 +760,16 @@ class SasModelApp(QMainWindow):
                     ds.attrs["units"] = stage_i_unit
 
             if "I" in stage_group and "ISigma" in stage_group:
-                stage_group["I"].attrs["uncertainties"] = "ISigma"
+                cast(H5DatasetLike, stage_group["I"]).attrs["uncertainties"] = "ISigma"
             if "Q" in stage_group and "QSigma" in stage_group:
-                stage_group["Q"].attrs["uncertainties"] = "QSigma"
+                cast(H5DatasetLike, stage_group["Q"]).attrs["uncertainties"] = "QSigma"
 
-            if stage_bundle is not None:
-                description = str(getattr(stage_bundle, "description", "") or "")
+            if stage_bundle_obj is not None:
+                description = str(getattr(stage_bundle_obj, "description", "") or "")
                 if description:
                     stage_group.attrs["description"] = description
 
-    def _write_settings_group(self, sme_group: object, snapshot: object, text_dtype: object) -> None:
+    def _write_settings_group(self, sme_group: H5GroupLike, snapshot: ExportSnapshot, text_dtype: object) -> None:
         """Write non-model settings payload under SME_settings."""
 
         settings_group = sme_group.create_group("SME_settings")
@@ -619,7 +809,7 @@ class SasModelApp(QMainWindow):
         settings_group.create_dataset("data_mode_label", data=data_mode_text, dtype=text_dtype)
         settings_group.create_dataset("exporter", data="SasModelsExplorer", dtype=text_dtype)
 
-    def _write_state_hdf5_tree(self, h5f: object, snapshot: object) -> None:
+    def _write_state_hdf5_tree(self, h5f: H5GroupLike, snapshot: ExportSnapshot) -> None:
         """Write the complete /analyses/SasModelsExplorer state tree."""
 
         import h5py
@@ -668,16 +858,16 @@ class SasModelApp(QMainWindow):
 
     def _read_new_state_hdf5(
         self,
-        h5f: object,
+        h5f: H5GroupLike,
         file_path: str,
-        base_data_cls: object,
-        data_bundle_cls: object,
-    ) -> dict[str, object]:
+        base_data_cls: BaseDataFactory,
+        data_bundle_cls: DataBundleFactory,
+    ) -> LoadedExplorerState:
         """Read state payload from the /analyses/SasModelsExplorer tree."""
 
-        sme_group = h5f["/analyses/SasModelsExplorer"]
-        settings_group = sme_group.get("SME_settings")
-        model_group = sme_group.get("model")
+        sme_group = cast(H5GroupLike, h5f["/analyses/SasModelsExplorer"])
+        settings_group = cast(H5GroupLike | None, sme_group.get("SME_settings"))
+        model_group = cast(H5GroupLike | None, sme_group.get("model"))
 
         model_expression = self._dataset_text(sme_group, "model_name", "").strip()
         if not model_expression:
@@ -687,51 +877,54 @@ class SasModelApp(QMainWindow):
         model_i_unit = ""
         if model_group is not None:
             if "Q" in model_group:
-                model_q_unit = str(model_group["Q"].attrs.get("units", ""))
+                model_q_unit = str(cast(H5DatasetLike, model_group["Q"]).attrs.get("units", ""))
             if "I" in model_group:
-                model_i_unit = str(model_group["I"].attrs.get("units", ""))
-            if not model_q_unit:
-                model_q_unit = str(model_group.attrs.get("Q_unit", ""))
-            if not model_i_unit:
-                model_i_unit = str(model_group.attrs.get("I_unit", ""))
+                model_i_unit = str(cast(H5DatasetLike, model_group["I"]).attrs.get("units", ""))
 
         q_unit = self._dataset_text(settings_group, "q_unit", model_q_unit or "1/nm")
         intensity_unit = self._dataset_text(settings_group, "intensity_unit", model_i_unit or self.i_units[0])
         q_min = self._dataset_float(settings_group, "q_min", 0.01)
         q_max = self._dataset_float(settings_group, "q_max", 10.0)
 
-        parameters = {}
-        parameters_group = sme_group.get("parameters")
+        parameters: ParameterMapping = {}
+        parameters_group = cast(H5GroupLike | None, sme_group.get("parameters"))
         if parameters_group is not None:
             for item_name in parameters_group.keys():
-                dataset = parameters_group[item_name]
+                dataset = cast(H5DatasetLike, parameters_group[item_name])
                 raw_value = self._dataset_scalar_to_python(dataset[()])
-                parameter_name = str(item_name)
-                if "parameter_name" in dataset.attrs:
-                    parameter_name = str(self._dataset_scalar_to_python(dataset.attrs.get("parameter_name", item_name)))
-                parameters[parameter_name] = raw_value
+                parameters[str(item_name)] = raw_value
 
-        hidden_defaults = json.loads(self._dataset_text(settings_group, "hidden_parameter_defaults_json", "{}"))
-        fit_names = json.loads(self._dataset_text(settings_group, "fit_parameter_names_json", "[]"))
+        hidden_defaults = SasModelApp._parse_parameter_json(
+            self._dataset_text(settings_group, "hidden_parameter_defaults_json", "{}")
+        )
+        fit_names = SasModelApp._parse_string_list_json(
+            self._dataset_text(settings_group, "fit_parameter_names_json", "[]")
+        )
         source_file = self._dataset_text(settings_group, "data_source_file", "").strip()
         stage_name = self._dataset_text(settings_group, "selected_data_stage", "").strip()
         yaml_text = self._dataset_text(settings_group, "data_loading_yaml", "")
         yaml_preset = self._dataset_text(settings_group, "data_loading_preset", "")
 
-        stage_bundles: dict[str, object] = {}
-        data_group = sme_group.get("data")
+        stage_bundles: StageBundleMap = {}
+        data_group = cast(H5GroupLike | None, sme_group.get("data"))
         if data_group is not None:
             for candidate_stage in data_group.keys():
-                stage_group = data_group[candidate_stage]
+                stage_group = cast(H5GroupLike, data_group[candidate_stage])
                 if "Q" not in stage_group or "I" not in stage_group:
                     continue
-                q_data = np.asarray(stage_group["Q"][()], dtype=float)
-                i_data = np.asarray(stage_group["I"][()], dtype=float)
+                q_dataset = cast(H5DatasetLike, stage_group["Q"])
+                i_dataset = cast(H5DatasetLike, stage_group["I"])
+                q_data = np.asarray(q_dataset[()], dtype=float)
+                i_data = np.asarray(i_dataset[()], dtype=float)
                 if q_data.size == 0 or i_data.size == 0:
                     continue
-                i_sigma = np.asarray(stage_group["ISigma"][()], dtype=float) if "ISigma" in stage_group else None
-                stage_q_unit = str(stage_group["Q"].attrs.get("units", q_unit))
-                stage_i_unit = str(stage_group["I"].attrs.get("units", intensity_unit))
+                i_sigma = (
+                    np.asarray(cast(H5DatasetLike, stage_group["ISigma"])[()], dtype=float)
+                    if "ISigma" in stage_group
+                    else None
+                )
+                stage_q_unit = str(q_dataset.attrs.get("units", q_unit))
+                stage_i_unit = str(i_dataset.attrs.get("units", intensity_unit))
                 q_obj = base_data_cls(signal=q_data, units=normalize_unit_label(stage_q_unit))
                 i_unc = {} if i_sigma is None else {"ISigma": i_sigma}
                 i_obj = base_data_cls(signal=i_data, units=stage_i_unit, uncertainties=i_unc)
@@ -743,29 +936,29 @@ class SasModelApp(QMainWindow):
                     bundle.description = f"Imported from {Path(file_path).name} ({candidate_stage})"  # type: ignore[attr-defined]
                 stage_bundles[str(candidate_stage)] = bundle
 
-        return {
-            "model_expression": model_expression,
-            "q_unit": q_unit,
-            "intensity_unit": intensity_unit,
-            "q_min": q_min,
-            "q_max": q_max,
-            "parameters": parameters,
-            "hidden_defaults": hidden_defaults,
-            "fit_names": fit_names,
-            "source_file": source_file,
-            "stage_name": stage_name,
-            "yaml_text": yaml_text,
-            "yaml_preset": yaml_preset,
-            "stage_bundles": stage_bundles,
-        }
+        return LoadedExplorerState(
+            model_expression=model_expression,
+            q_unit=q_unit,
+            intensity_unit=intensity_unit,
+            q_min=q_min,
+            q_max=q_max,
+            parameters=parameters,
+            hidden_defaults=hidden_defaults,
+            fit_names=fit_names,
+            source_file=source_file,
+            stage_name=stage_name,
+            yaml_text=yaml_text,
+            yaml_preset=yaml_preset,
+            stage_bundles=stage_bundles,
+        )
 
     def _read_state_hdf5(
         self,
-        h5f: object,
+        h5f: H5GroupLike,
         file_path: str,
-        base_data_cls: object,
-        data_bundle_cls: object,
-    ) -> dict[str, object]:
+        base_data_cls: BaseDataFactory,
+        data_bundle_cls: DataBundleFactory,
+    ) -> LoadedExplorerState:
         """Read state payload from the current HDF5 schema."""
 
         if "/analyses/SasModelsExplorer" not in h5f:
@@ -792,58 +985,49 @@ class SasModelApp(QMainWindow):
             from mcsas3.data_model import BaseData, DataBundle
 
             with h5py.File(file_path, "r") as h5f:
-                state = self._read_state_hdf5(h5f, file_path, BaseData, DataBundle)
+                state = self._read_state_hdf5(
+                    cast(H5GroupLike, h5f),
+                    file_path,
+                    cast(BaseDataFactory, BaseData),
+                    cast(DataBundleFactory, DataBundle),
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Load State", f"Failed to load state: {exc}")
             self._set_export_status(f"Load failed: {exc}")
             return
 
-        model_expression = str(state.get("model_expression", ""))
-        q_unit = str(state.get("q_unit", "1/nm"))
-        q_min = float(state.get("q_min", 0.01))
-        q_max = float(state.get("q_max", 10.0))
-        parameters = state.get("parameters", {})
-        hidden_defaults = state.get("hidden_defaults", {})
-        fit_names = state.get("fit_names", [])
-        source_file = str(state.get("source_file", "")).strip()
-        stage_name = str(state.get("stage_name", "")).strip()
-        yaml_text = str(state.get("yaml_text", ""))
-        yaml_preset = str(state.get("yaml_preset", "")).strip()
-        stage_bundles = state.get("stage_bundles", {})
-
-        self.model_input.setText(model_expression)
+        self.model_input.setText(state.model_expression)
         self.load_model_parameters()
-        self.q_min_input.setText(f"{q_min:.6g}")
-        self.q_max_input.setText(f"{q_max:.6g}")
-        self._set_q_unit_selection(q_unit)
+        self.q_min_input.setText(f"{state.q_min:.6g}")
+        self.q_max_input.setText(f"{state.q_max:.6g}")
+        self._set_q_unit_selection(state.q_unit)
 
-        if isinstance(hidden_defaults, dict):
-            self.hidden_parameter_defaults = dict(hidden_defaults)
+        self.hidden_parameter_defaults = dict(state.hidden_defaults)
 
-        if isinstance(parameters, dict):
-            visible_values = {
-                name: value for name, value in parameters.items() if name in self.parameter_panel.parameters
-            }
-            self.parameter_panel.set_values(visible_values, emit_change=False)
+        visible_values = {
+            name: value for name, value in state.parameters.items() if name in self.parameter_panel.parameters
+        }
+        self.parameter_panel.set_values(visible_values, emit_change=False)
 
-        if isinstance(fit_names, list):
-            selected_names = [name for name in fit_names if name in self.parameter_panel.parameters]
-            self.fit_panel.set_selected_parameters(selected_names)
+        selected_names = [name for name in state.fit_names if name in self.parameter_panel.parameters]
+        self.fit_panel.set_selected_parameters(selected_names)
 
-        if source_file:
-            self.data_panel.file_path_line.setText(source_file)
-        if yaml_text:
+        if state.source_file:
+            self.data_panel.file_path_line.setText(state.source_file)
+        if state.yaml_text:
             self.data_panel.set_yaml_config_text(
-                yaml_text,
+                state.yaml_text,
                 mark_custom=True,
                 prefer_matching_preset=True,
-                preferred_preset_name=yaml_preset or None,
+                preferred_preset_name=state.yaml_preset or None,
             )
 
-        if stage_bundles:
-            selected_stage = stage_name if stage_name in stage_bundles else next(iter(stage_bundles))
+        if state.stage_bundles:
+            selected_stage = (
+                state.stage_name if state.stage_name in state.stage_bundles else next(iter(state.stage_bundles))
+            )
             self.data_panel.set_stage_bundles(
-                stage_bundles,
+                cast(dict[str, object], state.stage_bundles),
                 selected_stage=selected_stage,
                 message="Loaded stage data from state file.",
             )
@@ -948,7 +1132,7 @@ class SasModelApp(QMainWindow):
 
         self._set_export_status(f"Exported run configuration to {file_path}")
 
-    def build_export_snapshot(self) -> object:
+    def build_export_snapshot(self) -> ExportSnapshot:
         """Build a backend export snapshot from the current UI state."""
 
         if self.model is None or self.kernel is None:
@@ -958,7 +1142,8 @@ class SasModelApp(QMainWindow):
         parameters = self._current_parameter_values()
         q_values = np.asarray(self.q, dtype=float)
         model_intensity = np.asarray(compute_intensity(self.kernel, parameters), dtype=float)
-        overlay_data = overlay_from_bundle(self.data_panel.get_data_bundle(), self.qunit, self.i_units[0])
+        data_bundle = cast(Mapping[str, BaseDataLike] | None, self.data_panel.get_data_bundle())
+        overlay_data = overlay_from_bundle(data_bundle, self.qunit, self.i_units[0])
 
         session = ModelSessionState(
             model_expression=model_expression,

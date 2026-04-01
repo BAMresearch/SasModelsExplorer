@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -41,7 +42,7 @@ def fit_model(
     model_info: ModelInfoLike,
     parameters: ParameterMapping,
     fit_names: list[str],
-    parameter_defs: dict[str, object],
+    parameter_defs: Mapping[str, object],
     data: OverlayData,
     q_unit: str,
     max_nfev: int,
@@ -106,7 +107,7 @@ def _compute_model_intensity(kernel: object, parameters: ParameterMapping, scale
 def _build_bounds(
     parameters: ParameterMapping,
     fit_names: list[str],
-    parameter_defs: dict[str, object],
+    parameter_defs: Mapping[str, object],
 ) -> tuple[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]], list[str]]:
     """Build initial values and scipy-compatible bounds for selected fit parameters."""
 

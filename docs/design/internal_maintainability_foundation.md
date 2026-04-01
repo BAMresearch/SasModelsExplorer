@@ -75,23 +75,20 @@ reworking core state extraction.
   - `ModelExplorer/parameter_panel.py`
   - `ModelExplorer/data_loading_panel.py`
   - `ModelExplorer/modelbrowser.py`
+  - `ModelExplorer/yaml_editor_widget.py`
+  - `ModelExplorer/modelexplorer.py`
 - pre-commit reliability:
   - repo-managed hooks via `.githooks`,
   - stable wrapper hook at `.githooks/pre-commit`,
   - bootstrap command: `./scripts/bootstrap_dev.sh`.
 
-## Typing Backlog (Phase Follow-Up)
+## Follow-Up (Optional)
 
-Current mypy gate intentionally focuses on service/core modules plus selected UI modules.
-Remaining UI-heavy modules (`modelexplorer.py`, `yaml_editor_widget.py`) still need staged
-type-hardening due PyQt dynamic APIs.
+`modelexplorer.py` is now part of the mypy gate and uses typed state/protocol helpers for HDF5 IO.
 
-Recommended order:
+Recommended next cleanup:
 
-1. Define lightweight protocols/dataclasses for UI-to-service payloads currently typed as `object`.
-2. Type-harden `parameter_panel.py` and `fitting_panel.py` interfaces together.
-3. Move HDF5 IO orchestration from `modelexplorer.py` into typed service adapters.
-4. Add targeted mypy module inclusions incrementally after each module is clean.
+1. Move remaining HDF5 read/write orchestration from `modelexplorer.py` to a dedicated typed persistence service.
 
 ## Checklist for Future Developers
 

@@ -64,6 +64,8 @@ files = [
   "ModelExplorer/parameter_panel.py",
   "ModelExplorer/data_loading_panel.py",
   "ModelExplorer/modelbrowser.py",
+  "ModelExplorer/yaml_editor_widget.py",
+  "ModelExplorer/modelexplorer.py",
   "ModelExplorer/utils",
 ]
 exclude = "(^dist/|^build/)"
@@ -75,10 +77,6 @@ warn_unused_configs = true
 no_implicit_optional = true
 disable_error_code = ["import-untyped"]
 pretty = true
-
-[[tool.mypy.overrides]]
-module = ["ModelExplorer.yaml_editor_widget"]
-ignore_errors = true
 
 [tool.setuptools.packages.find]
 include = ["ModelExplorer*"]
