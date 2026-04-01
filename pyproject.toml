@@ -61,6 +61,7 @@ files = [
   "ModelExplorer/sasmodels_adapter.py",
   "ModelExplorer/export_panel.py",
   "ModelExplorer/fitting_panel.py",
+  "ModelExplorer/parameter_panel.py",
   "ModelExplorer/utils",
 ]
 exclude = "(^dist/|^build/)"
