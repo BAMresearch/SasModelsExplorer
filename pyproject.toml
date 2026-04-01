@@ -63,6 +63,7 @@ files = [
   "ModelExplorer/fitting_panel.py",
   "ModelExplorer/parameter_panel.py",
   "ModelExplorer/data_loading_panel.py",
+  "ModelExplorer/modelbrowser.py",
   "ModelExplorer/utils",
 ]
 exclude = "(^dist/|^build/)"

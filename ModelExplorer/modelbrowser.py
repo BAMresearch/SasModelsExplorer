@@ -39,7 +39,7 @@ class ModelBrowser(QWidget):
         self.tree.itemDoubleClicked.connect(self._handle_click)
         self.search.textChanged.connect(self._filter_tree)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+    def showEvent(self, event: QShowEvent | None) -> None:  # noqa: N802
         """Focus the search box when the browser becomes visible."""
 
         super().showEvent(event)
@@ -84,9 +84,13 @@ class ModelBrowser(QWidget):
         filter_text = text.lower().strip()
         for index in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(index)
+            if parent is None:
+                continue
             parent_visible = False
             for child_index in range(parent.childCount()):
                 child = parent.child(child_index)
+                if child is None:
+                    continue
                 match = filter_text in child.text(0).lower()
                 child.setHidden(not match)
                 if match:
