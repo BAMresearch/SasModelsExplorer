@@ -6,32 +6,16 @@ from ModelExplorer.services.fitting_engine import fit_model
 from ModelExplorer.types import OverlayData
 
 
-class DummyMcData1D:
-    def __init__(self, filename, nbins, csvargs, pathDict, IEmin, dataRange, omitQRanges, resultIndex):
-        self.filename = filename
-        self.nbins = nbins
-        self.csvargs = csvargs
-        self.pathDict = pathDict
-        self.IEmin = IEmin
-        self.dataRange = dataRange
-        self.omitQRanges = omitQRanges
-        self.resultIndex = resultIndex
-        self.rawData = None
-        self.clippedData = None
-        self.binnedData = None
-
-
 class DummyBaseData:
-    def __init__(self, signal, units, uncertainties, rank_of_data):
-        self.signal = signal
+    def __init__(self, signal, units, uncertainties=None):
+        self.signal = np.asarray(signal, dtype=float)
         self.units = units
-        self.uncertainties = uncertainties
-        self.rank_of_data = rank_of_data
+        self.uncertainties = uncertainties or {}
 
 
 class DummyDataBundle(dict):
     description = None
-    default_plot = None
+    default_plot = "signal"
 
 
 class DummyModel:
@@ -53,46 +37,56 @@ class DummyParameter:
         self.limits = limits
 
 
+def _dummy_bundle(q, i, sigma):
+    bundle = DummyDataBundle()
+    bundle["signal"] = DummyBaseData(i, "1/(m sr)", uncertainties={"propagate_to_all": np.asarray(sigma)})
+    bundle["Q"] = DummyBaseData(q, "1/nm", uncertainties={})
+    return bundle
+
+
+def _dummy_select_bundle(processing, *, stage_name):
+    return processing[stage_name]
+
+
+def _dummy_frame_from_bundle(bundle):
+    return {
+        "Q": np.asarray(bundle["Q"].signal, dtype=float),
+        "I": np.asarray(bundle["signal"].signal, dtype=float),
+        "ISigma": np.asarray(next(iter(bundle["signal"].uncertainties.values())), dtype=float),
+    }
+
+
 def test_data_to_fit_integration(tmp_path, monkeypatch):
     pytest.importorskip("scipy", reason="scipy not installed")
     data_path = tmp_path / "data.dat"
     data_path.write_text("dummy")
 
-    mds = DummyMcData1D(
-        filename=data_path,
-        nbins=100,
-        csvargs={},
-        pathDict=None,
-        IEmin=0.01,
-        dataRange=[-np.inf, np.inf],
-        omitQRanges=[],
-        resultIndex=1,
-    )
-
     Q_vals = np.array([0.1, 0.2, 0.3], dtype=float)
     I_vals = 2.0 * Q_vals
     sigma = np.full_like(Q_vals, 0.01)
-    mds.binnedData = {"Q": Q_vals, "I": I_vals, "ISigma": sigma}
+    processing = {"sample_binned": _dummy_bundle(Q_vals, I_vals, sigma)}
 
-    def mc_factory(**kwargs):
-        return mds
+    def prepare_factory(filename, result_index, **_):
+        assert filename == data_path
+        assert result_index == 1
+        return processing
 
     bundle, used_kind, count = data_loader.load_data_bundle(
         data_path,
-        "binnedData",
-        "Q_unit: 1/Angstrom\nI_unit: 1/(m sr)",
-        mc_factory,
-        DummyBaseData,
-        DummyDataBundle,
+        "sample_binned",
+        "sourceQUnits: 1/Angstrom\nsourceIntensityUnits: 1/(m sr)",
+        prepare_factory,
+        _dummy_select_bundle,
+        _dummy_frame_from_bundle,
     )
 
-    assert used_kind == "binnedData"
+    assert used_kind == "sample_binned"
     assert count == 3
 
     overlay = OverlayData(
         Q=bundle["Q"].signal,
-        I=bundle["I"].signal,
-        ISigma=bundle["I"].uncertainties["ISigma"],
+        I=bundle["signal"].signal,
+        ISigma=next(iter(bundle["signal"].uncertainties.values())),
         label="data",
     )
 

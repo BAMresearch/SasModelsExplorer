@@ -39,6 +39,9 @@ pre-commit install
 
 Ruff handles linting and formatting (`ruff check` / `ruff format`).
 
+Design notes:
+- `docs/design/processingdata_migration_plan.md` documents the canonical McSAS3/MoDaCor data-model migration.
+
 ## Building executables
 
 With your local `.venv` active, run:

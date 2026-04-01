@@ -9,23 +9,22 @@ import yaml
 from ModelExplorer.types import DataConfig
 from ModelExplorer.utils.units import DEFAULT_I_UNIT, DEFAULT_Q_UNIT, normalize_unit_label
 
+CANONICAL_STAGE_ALIASES = {
+    "rawData": "sample_raw",
+    "clippedData": "sample_clipped",
+    "binnedData": "sample_binned",
+}
+CANONICAL_STAGE_FALLBACKS = ("sample_binned", "sample_clipped", "sample_raw")
+
 
 def parse_yaml_config(yaml_text: str) -> DataConfig:
-    if yaml_text.strip():
-        try:
-            raw = yaml.safe_load(yaml_text)
-        except yaml.YAMLError as exc:
-            raise ValueError(f"YAML error: {exc}") from exc
-    else:
-        raw = {}
-
-    if raw is None:
-        raw = {}
-    if not isinstance(raw, dict):
-        raise ValueError("YAML configuration must be a mapping.")
-
-    q_unit = normalize_unit_label(raw.get("Q_unit") or raw.get("q_unit") or DEFAULT_Q_UNIT)
-    i_unit = normalize_unit_label(raw.get("I_unit") or raw.get("i_unit") or DEFAULT_I_UNIT)
+    raw = _parse_yaml_mapping(yaml_text)
+    q_unit = normalize_unit_label(
+        raw.get("sourceQUnits") or raw.get("QUnits") or raw.get("Q_unit") or raw.get("q_unit") or DEFAULT_Q_UNIT
+    )
+    i_unit = normalize_unit_label(
+        raw.get("sourceIntensityUnits") or raw.get("IUnits") or raw.get("I_unit") or raw.get("i_unit") or DEFAULT_I_UNIT
+    )
 
     cfg = DataConfig(
         nbins=int(raw.get("nbins", DataConfig.nbins)),
@@ -45,58 +44,98 @@ def load_data_bundle(
     data_path: Path,
     data_kind: str,
     yaml_text: str,
-    McData1D: Any,
-    BaseData: Any,
-    DataBundle: Any,
+    prepare_processing_from_file: Any,
+    selected_bundle_from_processing: Any,
+    frame_from_bundle: Any,
 ) -> Tuple[Any, str, int]:
+    raw = _parse_yaml_mapping(yaml_text)
     config = parse_yaml_config(yaml_text)
-    mds = _load_mcsas3_data(data_path, config, McData1D)
-    data_df, used_kind = _select_data_frame(mds, data_kind)
-    if data_df is None or used_kind is None:
+    processing = _load_processing_data(data_path, raw, config, prepare_processing_from_file)
+    bundle, used_kind = _select_bundle(processing, data_kind, selected_bundle_from_processing, frame_from_bundle)
+    if bundle is None or used_kind is None:
         raise ValueError("No data available after loading.")
 
-    Q_vals, I_vals, sigma, q_sigma = _extract_data_arrays(data_df)
+    Q_vals, _I_vals, _sigma, _q_sigma = _extract_data_arrays(frame_from_bundle(bundle))
     if Q_vals.size == 0:
         raise ValueError("No finite data points found.")
 
-    bundle = _build_data_bundle(
-        Q_vals,
-        I_vals,
-        sigma,
-        q_sigma,
-        config,
-        data_path,
-        used_kind,
-        BaseData,
-        DataBundle,
-    )
+    bundle.description = f"{data_path.name} ({used_kind})"
     return bundle, used_kind, Q_vals.size
 
 
-def _load_mcsas3_data(data_path: Path, config: DataConfig, McData1D: Any) -> Any:
-    return McData1D(
-        filename=data_path,
-        nbins=int(config.nbins),
-        csvargs=config.csvargs,
-        pathDict=config.pathDict,
-        IEmin=float(config.IEmin),
-        dataRange=config.dataRange,
-        omitQRanges=config.omitQRanges,
-        resultIndex=int(config.resultIndex),
+def _parse_yaml_mapping(yaml_text: str) -> dict[str, Any]:
+    if yaml_text.strip():
+        try:
+            raw = yaml.safe_load(yaml_text)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"YAML error: {exc}") from exc
+    else:
+        raw = {}
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("YAML configuration must be a mapping.")
+    return raw
+
+
+def _load_processing_data(
+    data_path: Path,
+    raw: dict[str, Any],
+    config: DataConfig,
+    prepare_processing_from_file: Any,
+) -> Any:
+    workflow_config = {
+        "loader": raw.get("loader", None),
+        "csvargs": config.csvargs,
+        "pathDict": config.pathDict,
+        "IEmin": float(config.IEmin),
+        "dataRange": config.dataRange,
+        "omitQRanges": config.omitQRanges,
+        "nbins": int(config.nbins),
+        "sourceQUnits": config.Q_unit,
+        "sourceIntensityUnits": config.I_unit,
+    }
+
+    qemin = raw.get("qemin", raw.get("QEMin", None))
+    if qemin is not None:
+        workflow_config["qemin"] = float(qemin)
+    analysis_stage = raw.get("analysisStage", None)
+    if analysis_stage is not None:
+        workflow_config["analysisStage"] = _canonical_stage_name(str(analysis_stage))
+
+    return prepare_processing_from_file(
+        data_path,
+        result_index=int(config.resultIndex),
+        **workflow_config,
     )
 
 
-def _select_data_frame(mds: Any, data_kind: str) -> Tuple[Optional[Any], Optional[str]]:
-    data_df = getattr(mds, data_kind, None)
-    if data_df is None or len(data_df) == 0:
-        for fallback in ("binnedData", "clippedData", "rawData"):
-            data_df = getattr(mds, fallback, None)
-            if data_df is not None and len(data_df) > 0:
-                data_kind = fallback
-                break
-    if data_df is None or len(data_df) == 0:
-        return None, None
-    return data_df, data_kind
+def _canonical_stage_name(stage_name: str) -> str:
+    return CANONICAL_STAGE_ALIASES.get(stage_name, stage_name)
+
+
+def _select_bundle(
+    processing: Any,
+    data_kind: str,
+    selected_bundle_from_processing: Any,
+    frame_from_bundle: Any,
+) -> Tuple[Optional[Any], Optional[str]]:
+    requested_stage = _canonical_stage_name(data_kind)
+    lookup_stages = [requested_stage]
+    lookup_stages.extend(stage for stage in CANONICAL_STAGE_FALLBACKS if stage not in lookup_stages)
+
+    for stage_name in lookup_stages:
+        try:
+            bundle = selected_bundle_from_processing(processing, stage_name=stage_name)
+        except Exception:
+            continue
+        try:
+            frame = frame_from_bundle(bundle)
+        except Exception:
+            continue
+        if frame is not None and len(frame) > 0:
+            return bundle, stage_name
+    return None, None
 
 
 def _extract_data_arrays(
@@ -142,35 +181,3 @@ def _extract_data_arrays(
         q_sigma = q_sigma[order]
 
     return Q_vals, I_vals, sigma, q_sigma
-
-
-def _build_data_bundle(
-    Q_vals: np.ndarray,
-    I_vals: np.ndarray,
-    sigma: Optional[np.ndarray],
-    q_sigma: Optional[np.ndarray],
-    config: DataConfig,
-    data_path: Path,
-    data_kind: str,
-    BaseData: Any,
-    DataBundle: Any,
-) -> Any:
-    bundle = DataBundle()
-    signal_unc = {"ISigma": sigma} if sigma is not None else {}
-    q_unc = {"QSigma": q_sigma} if q_sigma is not None else {}
-
-    bundle["I"] = BaseData(
-        signal=I_vals,
-        units=config.I_unit,
-        uncertainties=signal_unc,
-        rank_of_data=1,
-    )
-    bundle["Q"] = BaseData(
-        signal=Q_vals,
-        units=config.Q_unit,
-        uncertainties=q_unc,
-        rank_of_data=1,
-    )
-    bundle.default_plot = "I"
-    bundle.description = f"{data_path.name} ({data_kind})"
-    return bundle

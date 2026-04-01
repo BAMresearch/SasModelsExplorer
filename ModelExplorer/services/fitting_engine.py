@@ -52,7 +52,7 @@ def fit_model(
         return FitResult(False, "No numeric parameters selected.", parameters)
 
     def residuals(x: np.ndarray) -> np.ndarray:
-        for name, value in zip(used_names, x):
+        for name, value in zip(used_names, x, strict=False):
             parameters[name] = float(value)
         model_I = _compute_model_intensity(kernel, parameters, intensity_scale)
         return (model_I - data.I) / data.ISigma
@@ -64,7 +64,7 @@ def fit_model(
         max_nfev=max_nfev,
     )
 
-    for name, value in zip(used_names, result.x):
+    for name, value in zip(used_names, result.x, strict=False):
         parameters[name] = float(value)
 
     if result.success:

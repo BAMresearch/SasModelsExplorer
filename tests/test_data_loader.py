@@ -4,32 +4,41 @@ import pytest
 from ModelExplorer.services import data_loader
 
 
-class DummyMcData1D:
-    def __init__(self, filename, nbins, csvargs, pathDict, IEmin, dataRange, omitQRanges, resultIndex):
-        self.filename = filename
-        self.nbins = nbins
-        self.csvargs = csvargs
-        self.pathDict = pathDict
-        self.IEmin = IEmin
-        self.dataRange = dataRange
-        self.omitQRanges = omitQRanges
-        self.resultIndex = resultIndex
-        self.rawData = None
-        self.clippedData = None
-        self.binnedData = None
-
-
 class DummyBaseData:
-    def __init__(self, signal, units, uncertainties, rank_of_data):
-        self.signal = signal
+    def __init__(self, signal, units, uncertainties=None):
+        self.signal = np.asarray(signal, dtype=float)
         self.units = units
-        self.uncertainties = uncertainties
-        self.rank_of_data = rank_of_data
+        self.uncertainties = uncertainties or {}
 
 
 class DummyDataBundle(dict):
     description = None
-    default_plot = None
+    default_plot = "signal"
+
+
+def _dummy_bundle(q, i, sigma=None):
+    signal_unc = {}
+    if sigma is not None:
+        signal_unc["propagate_to_all"] = np.asarray(sigma, dtype=float)
+    bundle = DummyDataBundle()
+    bundle["signal"] = DummyBaseData(i, "1/(m sr)", uncertainties=signal_unc)
+    bundle["Q"] = DummyBaseData(q, "1/nm", uncertainties={})
+    return bundle
+
+
+def _dummy_frame_from_bundle(bundle):
+    frame = {
+        "Q": np.asarray(bundle["Q"].signal, dtype=float),
+        "I": np.asarray(bundle["signal"].signal, dtype=float),
+    }
+    uncertainties = bundle["signal"].uncertainties
+    if uncertainties:
+        frame["ISigma"] = np.asarray(next(iter(uncertainties.values())), dtype=float)
+    return frame
+
+
+def _dummy_select_bundle(processing, *, stage_name):
+    return processing[stage_name]
 
 
 def test_parse_yaml_config_defaults():
@@ -59,67 +68,100 @@ def test_load_data_bundle_builds_bundle(tmp_path):
     data_path = tmp_path / "data.dat"
     data_path.write_text("dummy")
 
-    mds = DummyMcData1D(
-        filename=data_path,
-        nbins=100,
-        csvargs={},
-        pathDict=None,
-        IEmin=0.01,
-        dataRange=[-np.inf, np.inf],
-        omitQRanges=[],
-        resultIndex=1,
+    stage_bundle = _dummy_bundle(
+        q=[0.1, 0.2, 0.3],
+        i=[1.0, 2.0, 3.0],
+        sigma=[0.1, 0.2, 0.3],
     )
-    mds.binnedData = {
-        "Q": np.array([0.1, 0.2, 0.3]),
-        "I": np.array([1.0, 2.0, 3.0]),
-        "ISigma": np.array([0.1, 0.2, 0.3]),
-    }
+    processing = {"sample_binned": stage_bundle}
 
-    def mc_factory(**kwargs):
-        return mds
+    def prepare_factory(filename, result_index, **_):
+        assert filename == data_path
+        assert result_index == 1
+        return processing
 
     bundle, used_kind, count = data_loader.load_data_bundle(
         data_path,
-        "binnedData",
+        "sample_binned",
         "",
-        mc_factory,
-        DummyBaseData,
-        DummyDataBundle,
+        prepare_factory,
+        _dummy_select_bundle,
+        _dummy_frame_from_bundle,
     )
 
-    assert used_kind == "binnedData"
+    assert used_kind == "sample_binned"
     assert count == 3
-    assert bundle.default_plot == "I"
-    assert "I" in bundle and "Q" in bundle
-    np.testing.assert_allclose(bundle["I"].signal, [1.0, 2.0, 3.0])
+    assert bundle is stage_bundle
+    np.testing.assert_allclose(bundle["signal"].signal, [1.0, 2.0, 3.0])
     np.testing.assert_allclose(bundle["Q"].signal, [0.1, 0.2, 0.3])
+
+
+def test_load_data_bundle_uses_stage_fallback(tmp_path):
+    data_path = tmp_path / "data.dat"
+    data_path.write_text("dummy")
+    processing = {"sample_binned": _dummy_bundle(q=[0.1, 0.2], i=[1.0, 2.0], sigma=[0.1, 0.1])}
+
+    def prepare_factory(filename, result_index, **_):
+        assert filename == data_path
+        assert result_index == 1
+        return processing
+
+    _, used_kind, count = data_loader.load_data_bundle(
+        data_path,
+        "sample_raw",
+        "",
+        prepare_factory,
+        _dummy_select_bundle,
+        _dummy_frame_from_bundle,
+    )
+
+    assert used_kind == "sample_binned"
+    assert count == 2
+
+
+def test_load_data_bundle_accepts_legacy_stage_alias(tmp_path):
+    data_path = tmp_path / "data.dat"
+    data_path.write_text("dummy")
+    processing = {"sample_binned": _dummy_bundle(q=[0.1], i=[1.0], sigma=[0.1])}
+
+    def prepare_factory(filename, result_index, **_):
+        assert filename == data_path
+        assert result_index == 1
+        return processing
+
+    _, used_kind, count = data_loader.load_data_bundle(
+        data_path,
+        "binnedData",
+        "",
+        prepare_factory,
+        _dummy_select_bundle,
+        _dummy_frame_from_bundle,
+    )
+
+    assert used_kind == "sample_binned"
+    assert count == 1
 
 
 def test_load_data_bundle_errors_on_missing_columns(tmp_path):
     data_path = tmp_path / "data.dat"
     data_path.write_text("dummy")
+    stage_bundle = _dummy_bundle(q=[0.1, 0.2], i=[1.0, 2.0], sigma=[0.1, 0.2])
+    processing = {"sample_binned": stage_bundle}
 
-    mds = DummyMcData1D(
-        filename=data_path,
-        nbins=100,
-        csvargs={},
-        pathDict=None,
-        IEmin=0.01,
-        dataRange=[-np.inf, np.inf],
-        omitQRanges=[],
-        resultIndex=1,
-    )
-    mds.binnedData = {"Q": np.array([0.1, 0.2])}
+    def prepare_factory(filename, result_index, **_):
+        assert filename == data_path
+        assert result_index == 1
+        return processing
 
-    def mc_factory(**kwargs):
-        return mds
+    def bad_frame_from_bundle(bundle):
+        return {"Q": bundle["Q"].signal}
 
     with pytest.raises(ValueError):
         data_loader.load_data_bundle(
             data_path,
-            "binnedData",
+            "sample_binned",
             "",
-            mc_factory,
-            DummyBaseData,
-            DummyDataBundle,
+            prepare_factory,
+            _dummy_select_bundle,
+            bad_frame_from_bundle,
         )

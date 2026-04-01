@@ -1,6 +1,7 @@
 # ModelExplorer/modelexplorer.py
 
 import logging
+from copy import deepcopy
 from typing import Any, List, Optional, Tuple
 
 import numpy as np
@@ -61,16 +62,17 @@ class SasModelApp(QMainWindow):
         """Initialize the UI, wire signals, and load the initial model."""
         super().__init__()
         self.setWindowTitle("SasModels Explorer")
+        self.resize(1400, 700)
 
         # generate the infoText:
         self.infoText = generate_model_info_text()
 
         # Left layout for controls
-        self.parameter_panel = ParameterPanel(on_change=self.update_plot, width=450)
+        self.parameter_panel = ParameterPanel(on_change=self.update_plot, width=500)
 
         # Text input for model
         self.model_input = QLineEdit(modelName)
-        self.model_input.setFixedWidth(300)
+        self.model_input.setFixedWidth(350)
         model_row = QWidget()
         model_layout = QHBoxLayout(model_row)
         model_layout.setContentsMargins(0, 0, 0, 0)
@@ -379,13 +381,16 @@ class SasModelApp(QMainWindow):
     ) -> Optional[OverlayData]:
         if data_bundle is None:
             return None
-        data_I = data_bundle.get("I")
+
+        data_I = data_bundle.get("signal")
+        if data_I is None:
+            data_I = data_bundle.get("I")
         data_Q = data_bundle.get("Q")
         if data_I is None or data_Q is None:
             return None
 
-        I_copy = self._copy_basedata(data_I)
-        Q_copy = self._copy_basedata(data_Q)
+        I_copy = deepcopy(data_I)
+        Q_copy = deepcopy(data_Q)
 
         target_Q_unit = normalize_unit_label(target_Q_unit)
         try:
@@ -396,9 +401,7 @@ class SasModelApp(QMainWindow):
 
         Q_vals = np.asarray(Q_copy.signal, dtype=float)
         I_vals = np.asarray(I_copy.signal, dtype=float)
-        sigma = None
-        if "ISigma" in I_copy.uncertainties:
-            sigma = np.asarray(I_copy.uncertainties["ISigma"], dtype=float)
+        sigma = self._combined_uncertainty(I_copy)
 
         mask = np.isfinite(Q_vals) & np.isfinite(I_vals)
         if sigma is not None:
@@ -421,16 +424,17 @@ class SasModelApp(QMainWindow):
         label = getattr(data_bundle, "description", None) or "Data"
         return OverlayData(Q=Q_vals, I=I_vals, ISigma=sigma, label=label)
 
-    def _copy_basedata(self, source: Any) -> Any:
-        uncertainties = {key: np.array(val, copy=True) for key, val in source.uncertainties.items()}
-        weights = np.array(getattr(source, "weights", 1.0), copy=True)
-        return source.__class__(
-            signal=np.array(source.signal, copy=True),
-            units=source.units,
-            uncertainties=uncertainties,
-            weights=weights,
-            rank_of_data=getattr(source, "rank_of_data", 0),
-        )
+    def _combined_uncertainty(self, data: Any) -> Optional[np.ndarray]:
+        uncertainties = getattr(data, "uncertainties", None) or {}
+        if len(uncertainties) == 0:
+            return None
+        if "ISigma" in uncertainties:
+            return np.asarray(uncertainties["ISigma"], dtype=float)
+
+        variance = np.zeros_like(np.asarray(data.signal, dtype=float), dtype=float)
+        for value in uncertainties.values():
+            variance += np.asarray(value, dtype=float) ** 2
+        return np.sqrt(variance)
 
     def _compute_reduced_chi_square(
         self,

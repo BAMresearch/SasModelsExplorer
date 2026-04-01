@@ -18,6 +18,7 @@ dependencies = [
   "pandas",
   "h5py",
   "scipy",
+  "modacor",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -27,6 +28,9 @@ classifiers = [
 
 [project.scripts]
 ModelExplorer = "ModelExplorer.__main__:main"
+SME = "ModelExplorer.__main__:main"
+modelexplorer = "ModelExplorer.__main__:main"
+SasModelsExplorer = "ModelExplorer.__main__:main"
 
 [project.optional-dependencies]
 dev = [

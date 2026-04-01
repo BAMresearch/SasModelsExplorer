@@ -21,9 +21,13 @@ from PyQt6.QtWidgets import (
 from .services.data_loader import load_data_bundle
 from .yaml_editor_widget import YAMLEditorWidget
 
-DEFAULT_YAML = """# Units are assumed to be 1/(m sr) for I and 1/nm for Q
-Q_unit: "1/nm"
-I_unit: "1/(m sr)"
+STAGE_RAW = "sample_raw"
+STAGE_CLIPPED = "sample_clipped"
+STAGE_BINNED = "sample_binned"
+
+DEFAULT_YAML = """# Units below are interpreted as source file units.
+sourceQUnits: "1/nm"
+sourceIntensityUnits: "1/(m sr)"
 nbins: 100
 dataRange:
   - 0.0
@@ -72,14 +76,12 @@ class DataLoadingPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._mds = None
         self._data_bundle = None
         self._missing_deps: Optional[str] = None
 
-        self._McData1D = None
-        self._BaseData = None
-        self._DataBundle = None
-        self._modacor_ureg = None
+        self._prepare_processing_from_file = None
+        self._selected_bundle_from_processing = None
+        self._frame_from_bundle = None
 
         self._config_dir = self._find_default_config_dir()
         self._config_files: List[Path] = []
@@ -114,9 +116,9 @@ class DataLoadingPanel(QWidget):
         layout.addLayout(file_layout)
 
         self.data_mode_combo = QComboBox()
-        self.data_mode_combo.addItem("Binned data", "binnedData")
-        self.data_mode_combo.addItem("Clipped data", "clippedData")
-        self.data_mode_combo.addItem("Raw data", "rawData")
+        self.data_mode_combo.addItem("Binned data", STAGE_BINNED)
+        self.data_mode_combo.addItem("Clipped data", STAGE_CLIPPED)
+        self.data_mode_combo.addItem("Raw data", STAGE_RAW)
         self.data_mode_combo.currentIndexChanged.connect(self._schedule_load)
         layout.addWidget(QLabel("Overlay data source:"))
         layout.addWidget(self.data_mode_combo)
@@ -193,12 +195,19 @@ class DataLoadingPanel(QWidget):
         self._debounce_timer.start(300)
 
     def _ensure_mcsas3(self) -> bool:
-        if self._McData1D is not None:
+        if (
+            self._prepare_processing_from_file is not None
+            and self._selected_bundle_from_processing is not None
+            and self._frame_from_bundle is not None
+        ):
             return True
         try:
-            from mcsas3.mc_data_1d import McData1D
+            from mcsas3 import prepare_1d_processing_data_from_file, selected_bundle_from_processing
+            from mcsas3.data_adapters import frame_from_bundle
 
-            self._McData1D = McData1D
+            self._prepare_processing_from_file = prepare_1d_processing_data_from_file
+            self._selected_bundle_from_processing = selected_bundle_from_processing
+            self._frame_from_bundle = frame_from_bundle
             return True
         except Exception:
             pass
@@ -206,73 +215,22 @@ class DataLoadingPanel(QWidget):
         repo_root = Path(__file__).resolve().parents[1]
         local_src = repo_root.parent / "McSAS3" / "src"
         if local_src.is_dir():
-            sys.path.append(str(local_src))
+            if str(local_src) not in sys.path:
+                sys.path.append(str(local_src))
             try:
-                from mcsas3.mc_data_1d import McData1D
+                from mcsas3 import prepare_1d_processing_data_from_file, selected_bundle_from_processing
+                from mcsas3.data_adapters import frame_from_bundle
 
-                self._McData1D = McData1D
+                self._prepare_processing_from_file = prepare_1d_processing_data_from_file
+                self._selected_bundle_from_processing = selected_bundle_from_processing
+                self._frame_from_bundle = frame_from_bundle
                 return True
             except Exception as exc:
-                self._missing_deps = f"Failed to import McSAS3: {exc}"
+                self._missing_deps = f"Failed to import McSAS3 canonical workflow: {exc}"
                 return False
 
         self._missing_deps = "McSAS3 could not be imported. Install it or clone it next to this repo."
         return False
-
-    def _ensure_modacor(self) -> bool:
-        if self._BaseData is not None and self._DataBundle is not None:
-            return True
-        try:
-            from modacor import ureg as modacor_ureg
-            from modacor.dataclasses.basedata import BaseData
-            from modacor.dataclasses.databundle import DataBundle
-
-            self._BaseData = BaseData
-            self._DataBundle = DataBundle
-            self._modacor_ureg = modacor_ureg
-            self._ensure_modacor_units()
-            return True
-        except Exception:
-            pass
-
-        repo_root = Path(__file__).resolve().parents[1]
-        local_src = repo_root.parent / "MoDaCor" / "src"
-        if local_src.is_dir():
-            sys.path.append(str(local_src))
-            try:
-                from modacor import ureg as modacor_ureg
-                from modacor.dataclasses.basedata import BaseData
-                from modacor.dataclasses.databundle import DataBundle
-
-                self._BaseData = BaseData
-                self._DataBundle = DataBundle
-                self._modacor_ureg = modacor_ureg
-                self._ensure_modacor_units()
-                return True
-            except Exception as exc:
-                self._missing_deps = f"Failed to import MoDaCor: {exc}"
-                return False
-
-        self._missing_deps = "MoDaCor could not be imported. Install it or clone it next to this repo."
-        return False
-
-    def _ensure_modacor_units(self) -> None:
-        if self._modacor_ureg is None:
-            return
-        try:
-            self._modacor_ureg.Unit("Angstrom")
-        except Exception:
-            try:
-                self._modacor_ureg.define("Angstrom = 1e-10*m = Ang = angstrom")
-            except Exception:
-                pass
-        try:
-            self._modacor_ureg.Unit("percent")
-        except Exception:
-            try:
-                self._modacor_ureg.define("percent = 0.01 = %")
-            except Exception:
-                pass
 
     def _load_data(self) -> None:
         self._clear_message()
@@ -289,21 +247,21 @@ class DataLoadingPanel(QWidget):
             self.dataChanged.emit()
             return
 
-        if not self._ensure_mcsas3() or not self._ensure_modacor():
+        if not self._ensure_mcsas3():
             self._set_message(self._missing_deps or "Missing dependencies for data loading.")
             self.dataChanged.emit()
             return
 
         yaml_text = self.yaml_editor_widget.yaml_editor.toPlainText()
-        data_kind = self.data_mode_combo.currentData()
+        data_kind = str(self.data_mode_combo.currentData())
         try:
             bundle, used_kind, count = load_data_bundle(
                 data_path,
                 data_kind,
                 yaml_text,
-                self._McData1D,
-                self._BaseData,
-                self._DataBundle,
+                self._prepare_processing_from_file,
+                self._selected_bundle_from_processing,
+                self._frame_from_bundle,
             )
         except ValueError as exc:
             self._set_message(str(exc))
