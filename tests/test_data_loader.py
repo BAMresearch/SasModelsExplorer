@@ -73,7 +73,7 @@ omitQRanges: [[0.1, 0.2]]
 """
     config = data_loader.parse_yaml_config(yaml_text)
     assert config.nbins == 10
-    assert config.Q_unit == "1/Angstrom"
+    assert config.Q_unit == "1/angstrom"
     assert config.I_unit == "1/(cm sr)"
     assert config.IEmin == 0.02
     assert config.omitQRanges == [[0.1, 0.2]]
