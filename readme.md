@@ -40,7 +40,7 @@ This sets `core.hooksPath` to `.githooks`, installs pre-commit hooks, and keeps 
 hooks consistent.
 
 Ruff handles linting and formatting (`ruff check` / `ruff format`).
-Mypy is used for typed service-layer checks (`mypy`).
+Mypy is used for typed service-layer and selected UI-module checks (`mypy`).
 
 Design notes:
 - `docs/design/processingdata_migration_plan.md` documents the canonical McSAS3/MoDaCor data-model migration.

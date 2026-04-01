@@ -73,6 +73,7 @@ reworking core state extraction.
   - `ModelExplorer/export_panel.py`
   - `ModelExplorer/fitting_panel.py`
   - `ModelExplorer/parameter_panel.py`
+  - `ModelExplorer/data_loading_panel.py`
 - pre-commit reliability:
   - repo-managed hooks via `.githooks`,
   - stable wrapper hook at `.githooks/pre-commit`,
@@ -81,8 +82,8 @@ reworking core state extraction.
 ## Typing Backlog (Phase Follow-Up)
 
 Current mypy gate intentionally focuses on service/core modules plus selected UI modules.
-Remaining UI-heavy modules (`modelexplorer.py`, `data_loading_panel.py`, `modelbrowser.py`,
-`yaml_editor_widget.py`) still need staged type-hardening due PyQt dynamic APIs.
+Remaining UI-heavy modules (`modelexplorer.py`, `modelbrowser.py`, `yaml_editor_widget.py`)
+still need staged type-hardening due PyQt dynamic APIs.
 
 Recommended order:
 

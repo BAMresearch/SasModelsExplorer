@@ -1,7 +1,7 @@
 # ModelExplorer/data_loading_panel.py
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
@@ -49,14 +49,22 @@ class FileDropLineEdit(QLineEdit):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+    def dragEnterEvent(self, event: QDragEnterEvent | None) -> None:
+        if event is None:
+            return
+        mime_data = event.mimeData()
+        if mime_data is not None and mime_data.hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event: QDropEvent) -> None:
-        urls = event.mimeData().urls()
+    def dropEvent(self, event: QDropEvent | None) -> None:
+        if event is None:
+            return
+        mime_data = event.mimeData()
+        if mime_data is None:
+            return
+        urls = mime_data.urls()
         if not urls:
             event.ignore()
             return
@@ -269,7 +277,7 @@ class DataLoadingPanel(QWidget):
         except Exception:
             return
 
-        lines: List[str] = []
+        lines: list[str] = []
         try:
             with h5py.File(data_path, "r") as h5f:
 
@@ -307,7 +315,7 @@ class DataLoadingPanel(QWidget):
     def get_yaml_config_text(self) -> str:
         """Return current YAML configuration text from the editor."""
 
-        return self.yaml_editor_widget.yaml_editor.toPlainText()
+        return str(self.yaml_editor_widget.yaml_editor.toPlainText())
 
     def get_selected_preset_name(self) -> str | None:
         """Return selected preset filename, or ``None`` for custom/unknown selection."""
@@ -363,7 +371,7 @@ class DataLoadingPanel(QWidget):
                     except Exception:
                         preferred_text = ""
                     if self._normalize_yaml_text(preferred_text) == normalized_target:
-                        return preferred_index
+                        return int(preferred_index)
 
         for index in range(self.config_combo.count()):
             preset_path = self.config_combo.itemData(index)
