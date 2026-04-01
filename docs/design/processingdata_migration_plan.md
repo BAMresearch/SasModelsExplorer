@@ -1,5 +1,8 @@
 # ProcessingData Migration Plan
 
+Related design:
+- `docs/design/internal_maintainability_foundation.md` for service-layer refactor, typing policy, and export-prep contracts.
+
 ## Context
 
 `McSAS3`/`McSAS3GUI` moved to the canonical `ProcessingData` workflow model backed by MoDaCor
@@ -32,7 +35,9 @@ lean and maintainable.
 
 ### Runtime dependency loading
 
-- Keep local sibling-checkout fallback (`../McSAS3/src`) for development workflows.
+- Treat `mcsas3` and `modacor` as required runtime dependencies.
+- During transition, pin `mcsas3` to branch `in_depth_upgrades`.
+- Keep `mcsas3gui` optional and import-only where available.
 - Prefer canonical McSAS3 API imports; avoid importing removed/internal modules.
 
 ## 2. Implementation Plan
@@ -50,11 +55,10 @@ lean and maintainable.
 2. Add an integration test that exercises real McSAS3 + MoDaCor objects (not only dummies).
 3. Add a narrow compatibility shim module so data-model assumptions are centralized.
 
-### Phase 3 (if dependency policy allows)
+### Phase 3 (done in this update)
 
-1. Convert McSAS3 and MoDaCor from optional runtime presence to explicit project dependencies for
-   the data-loading feature profile.
-2. Gate packaging profiles (minimal vs full-feature) with explicit extras.
+1. Set `mcsas3` and `modacor` as explicit runtime dependencies.
+2. Keep `mcsas3gui` optional behind an extra (`gui-interop`) for widget reuse only.
 
 ## 3. Simplification Opportunities
 

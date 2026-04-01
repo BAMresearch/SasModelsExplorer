@@ -33,14 +33,18 @@ cd SasModelsExplorer
 Install dev tools and enable pre-commit hooks:
 
 ```bash
-pip install -r requirements-dev.txt
-pre-commit install
+./scripts/bootstrap_dev.sh
 ```
 
+This sets `core.hooksPath` to `.githooks`, installs pre-commit hooks, and keeps VS Code/CLI commit
+hooks consistent.
+
 Ruff handles linting and formatting (`ruff check` / `ruff format`).
+Mypy is used for typed service-layer checks (`mypy`).
 
 Design notes:
 - `docs/design/processingdata_migration_plan.md` documents the canonical McSAS3/MoDaCor data-model migration.
+- `docs/design/internal_maintainability_foundation.md` documents the maintainability and export-prep architecture.
 
 ## Building executables
 

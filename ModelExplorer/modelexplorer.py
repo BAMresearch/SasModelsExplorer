@@ -1,8 +1,7 @@
 # ModelExplorer/modelexplorer.py
 
 import logging
-from copy import deepcopy
-from typing import Any, List, Optional, Tuple
+from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import Qt
@@ -15,7 +14,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -37,8 +35,16 @@ from .sasmodels_adapter import (
     load_model_and_info,
     split_magnetic_parameters,
 )
+from .services.export_snapshot_builder import (
+    SnapshotInputs,
+)
+from .services.export_snapshot_builder import (
+    build_export_snapshot as build_export_snapshot_payload,
+)
 from .services.fitting_engine import fit_model
-from .types import OverlayData
+from .services.model_parameters import ensure_pd_parameter_defaults, merge_parameter_values
+from .services.overlay_processing import overlay_from_bundle, reduced_chi_square
+from .types import DataSelectionState, ModelSessionState
 from .utils.units import MODEL_INTENSITY_SCALE, create_unit_registry, normalize_unit_label
 
 ureg = create_unit_registry()
@@ -52,9 +58,9 @@ class SasModelApp(QMainWindow):
     kernel = None
     model_info = None
     model_parameters = None
-    pd_types: List = ["uniform", "rectangle", "gaussian", "lognormal", "schulz", "boltzmann"]
-    q_units: List = ["1/nm", "1/Ångström", "1/m"]
-    i_units: List = ["1/(m sr)", "1/(cm sr)"]
+    pd_types: list[str] = ["uniform", "rectangle", "gaussian", "lognormal", "schulz", "boltzmann"]
+    q_units: list[str] = ["1/nm", "1/Ångström", "1/m"]
+    i_units: list[str] = ["1/(m sr)", "1/(cm sr)"]
     qunit: str = None
     infoText: str = None
 
@@ -62,13 +68,13 @@ class SasModelApp(QMainWindow):
         """Initialize the UI, wire signals, and load the initial model."""
         super().__init__()
         self.setWindowTitle("SasModels Explorer")
-        self.resize(1400, 700)
+        self.resize(1440, 720)
 
         # generate the infoText:
         self.infoText = generate_model_info_text()
 
         # Left layout for controls
-        self.parameter_panel = ParameterPanel(on_change=self.update_plot, width=500)
+        self.parameter_panel = ParameterPanel(on_change=self.update_plot, width=540)
 
         # Text input for model
         self.model_input = QLineEdit(modelName)
@@ -183,7 +189,7 @@ class SasModelApp(QMainWindow):
         self._set_side_panel_visible(False)
 
     # only one structure factro per form factor allowed...
-    def append_model_text(self, model_name: str, is_structure: bool = False):
+    def append_model_text(self, model_name: str, is_structure: bool = False) -> None:
         current = self.model_input.text().strip()
 
         if not current:
@@ -338,29 +344,25 @@ class SasModelApp(QMainWindow):
 
         logging.info("updating plot")
 
-        parameters = self.parameter_panel.get_values()
-        parameters.update(self.hidden_parameter_defaults)
-
-        # Update the model parameters
-        # find names that are in the polydisperse parameter list
-        pd_params = [param for param in parameters.keys() if param in self.model.info.parameters.pd_1d]
-
-        for param in pd_params:
-            # for each parameter, add a _pd_type and a _pd_n
-            pd_n = param + "_pd_n"
-            parameters[pd_n] = 35
+        parameters = merge_parameter_values(self.parameter_panel.get_values(), self.hidden_parameter_defaults)
+        ensure_pd_parameter_defaults(parameters, getattr(self.model.info.parameters, "pd_1d", []))
 
         # Compute intensity
         Q = self.q
         Q_unit = self.qunit
-        # model = self.model
         kernel = self.kernel
-        logging.info(f"calling sasmodels with {[{p: v} for p, v in parameters.items()]}")
+        logging.info("calling sasmodels with %s parameters", len(parameters))
         I_model = compute_intensity(kernel, parameters)
 
         data_bundle = self.data_panel.get_data_bundle()
-        overlay_data = self._prepare_overlay_data(data_bundle, Q_unit, self.i_units[0])
-        chi2, dof, points = self._compute_reduced_chi_square(Q, I_model, overlay_data)
+        overlay_data = overlay_from_bundle(data_bundle, Q_unit, self.i_units[0])
+        chi2, dof, points = reduced_chi_square(
+            np.asarray(Q, dtype=float),
+            np.asarray(I_model, dtype=float),
+            overlay_data,
+            n_parameters=len(self.parameter_panel.get_values()),
+            intensity_scale=self.plot_manager.scale,
+        )
         chi_text = f"chi^2_red={chi2:.4g}" if chi2 is not None else None
         self.data_panel.set_chi_square(chi2, dof, points)
         self.plot_manager.plot(Q, I_model, Q_unit, data=overlay_data, chi_square_text=chi_text)
@@ -376,115 +378,18 @@ class SasModelApp(QMainWindow):
         else:
             self.right_splitter.setSizes([1, 0])
 
-    def _prepare_overlay_data(
-        self, data_bundle: Optional[Any], target_Q_unit: str, target_I_unit: str
-    ) -> Optional[OverlayData]:
-        if data_bundle is None:
-            return None
-
-        data_I = data_bundle.get("signal")
-        if data_I is None:
-            data_I = data_bundle.get("I")
-        data_Q = data_bundle.get("Q")
-        if data_I is None or data_Q is None:
-            return None
-
-        I_copy = deepcopy(data_I)
-        Q_copy = deepcopy(data_Q)
-
-        target_Q_unit = normalize_unit_label(target_Q_unit)
-        try:
-            Q_copy.to_units(target_Q_unit)
-            I_copy.to_units(target_I_unit)
-        except Exception:
-            pass
-
-        Q_vals = np.asarray(Q_copy.signal, dtype=float)
-        I_vals = np.asarray(I_copy.signal, dtype=float)
-        sigma = self._combined_uncertainty(I_copy)
-
-        mask = np.isfinite(Q_vals) & np.isfinite(I_vals)
-        if sigma is not None:
-            mask &= np.isfinite(sigma)
-
-        Q_vals = Q_vals[mask]
-        I_vals = I_vals[mask]
-        if sigma is not None:
-            sigma = sigma[mask]
-
-        if Q_vals.size == 0:
-            return None
-
-        order = np.argsort(Q_vals)
-        Q_vals = Q_vals[order]
-        I_vals = I_vals[order]
-        if sigma is not None:
-            sigma = sigma[order]
-
-        label = getattr(data_bundle, "description", None) or "Data"
-        return OverlayData(Q=Q_vals, I=I_vals, ISigma=sigma, label=label)
-
-    def _combined_uncertainty(self, data: Any) -> Optional[np.ndarray]:
-        uncertainties = getattr(data, "uncertainties", None) or {}
-        if len(uncertainties) == 0:
-            return None
-        if "ISigma" in uncertainties:
-            return np.asarray(uncertainties["ISigma"], dtype=float)
-
-        variance = np.zeros_like(np.asarray(data.signal, dtype=float), dtype=float)
-        for value in uncertainties.values():
-            variance += np.asarray(value, dtype=float) ** 2
-        return np.sqrt(variance)
-
-    def _compute_reduced_chi_square(
-        self,
-        Q: np.ndarray,
-        I: np.ndarray,  # noqa: E741
-        data: Optional[OverlayData],
-    ) -> Tuple[Optional[float], Optional[int], Optional[int]]:
-        if data is None:
-            return None, None, None
-        if data.ISigma is None:
-            return None, None, None
-
-        try:
-            model_I = self._interpolate_model(Q, I, data.Q) * self.plot_manager.scale
-        except Exception:
-            return None, None, None
-
-        mask = np.isfinite(model_I) & np.isfinite(data.I) & np.isfinite(data.ISigma) & (data.ISigma > 0)
-        if mask.sum() < 2:
-            return None, None, None
-
-        n_params = len(self.parameter_panel.get_values())
-        dof = max(int(mask.sum()) - n_params, 1)
-        chi2 = np.sum(((data.I[mask] - model_I[mask]) / data.ISigma[mask]) ** 2) / dof
-        return float(chi2), dof, int(mask.sum())
-
-    def _interpolate_model(self, Q_model: np.ndarray, I_model: np.ndarray, Q_data: np.ndarray) -> np.ndarray:
-        Q_model = np.asarray(Q_model, dtype=float)
-        I_model = np.asarray(I_model, dtype=float)
-        Q_data = np.asarray(Q_data, dtype=float)
-        if np.any(Q_model <= 0) or np.any(I_model <= 0) or np.any(Q_data <= 0):
-            return np.interp(Q_data, Q_model, I_model, left=np.nan, right=np.nan)
-        log_Q = np.log10(Q_model)
-        log_I = np.log10(I_model)
-        log_Qd = np.log10(Q_data)
-        log_I_interp = np.interp(log_Qd, log_Q, log_I, left=np.nan, right=np.nan)
-        return 10**log_I_interp
-
     def _run_fit(self) -> None:
         if self.model is None:
             return
         fit_names = self.fit_panel.get_selected_parameters()
         data_bundle = self.data_panel.get_data_bundle()
-        overlay_data = self._prepare_overlay_data(data_bundle, self.qunit, self.i_units[0])
+        overlay_data = overlay_from_bundle(data_bundle, self.qunit, self.i_units[0])
         if overlay_data is None:
             self.fit_panel.set_status("Load data before fitting.")
             return
 
-        parameters = self.parameter_panel.get_values()
-        parameters.update(self.hidden_parameter_defaults)
+        parameters = merge_parameter_values(self.parameter_panel.get_values(), self.hidden_parameter_defaults)
+        ensure_pd_parameter_defaults(parameters, getattr(self.model.info.parameters, "pd_1d", []))
         self.fit_panel.set_status("Fitting...")
         result = fit_model(
             model=self.model,
@@ -500,3 +405,51 @@ class SasModelApp(QMainWindow):
 
         self.parameter_panel.set_values(result.parameters)
         self.fit_panel.set_status(result.message)
+
+    def build_export_snapshot(self) -> object:
+        """Build a backend export snapshot from the current UI state."""
+
+        if self.model is None or self.kernel is None:
+            raise ValueError("Model must be loaded before creating an export snapshot.")
+
+        model_expression = self.model_input.text().strip()
+        parameters = merge_parameter_values(self.parameter_panel.get_values(), self.hidden_parameter_defaults)
+        ensure_pd_parameter_defaults(parameters, getattr(self.model.info.parameters, "pd_1d", []))
+        q_values = np.asarray(self.q, dtype=float)
+        model_intensity = np.asarray(compute_intensity(self.kernel, parameters), dtype=float)
+        overlay_data = overlay_from_bundle(self.data_panel.get_data_bundle(), self.qunit, self.i_units[0])
+
+        session = ModelSessionState(
+            model_expression=model_expression,
+            q_unit=self.qunit,
+            q_min=float(self.q_min_input.text()),
+            q_max=float(self.q_max_input.text()),
+            parameters=parameters,
+            hidden_defaults=dict(self.hidden_parameter_defaults),
+        )
+        data_state = DataSelectionState(
+            source_file=Path(self.data_panel.file_path_line.text()).expanduser()
+            if self.data_panel.file_path_line.text().strip()
+            else None,
+            stage_name=str(self.data_panel.data_mode_combo.currentData()),
+            points_loaded=int(0 if overlay_data is None else overlay_data.Q.size),
+            description=str("" if overlay_data is None else overlay_data.label),
+        )
+        return build_export_snapshot_payload(
+            SnapshotInputs(
+                model_expression=session.model_expression,
+                q_unit=session.q_unit,
+                intensity_unit=self.i_units[0],
+                parameters=session.parameters,
+                fit_parameter_names=self.fit_panel.get_selected_parameters(),
+                q_values=q_values,
+                model_intensity=model_intensity,
+                overlay_data=overlay_data,
+                metadata={
+                    "q_min": session.q_min,
+                    "q_max": session.q_max,
+                    "data_stage": data_state.stage_name,
+                    "data_points_loaded": data_state.points_loaded,
+                },
+            )
+        )

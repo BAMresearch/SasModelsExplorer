@@ -1,6 +1,5 @@
 # ModelExplorer/data_loading_panel.py
 
-import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -19,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .services.data_loader import load_data_bundle
+from .services.mcsas3_backend import ProcessingBackend, load_mcsas3_backend
 from .yaml_editor_widget import YAMLEditorWidget
 
 STAGE_RAW = "sample_raw"
@@ -76,15 +76,13 @@ class DataLoadingPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._data_bundle = None
+        self._data_bundle: object | None = None
         self._missing_deps: Optional[str] = None
 
-        self._prepare_processing_from_file = None
-        self._selected_bundle_from_processing = None
-        self._frame_from_bundle = None
+        self._backend: ProcessingBackend | None = None
 
         self._config_dir = self._find_default_config_dir()
-        self._config_files: List[Path] = []
+        self._config_files: list[Path] = []
 
         self._suppress_yaml_change = False
         self._debounce_timer = QTimer(self)
@@ -195,42 +193,14 @@ class DataLoadingPanel(QWidget):
         self._debounce_timer.start(300)
 
     def _ensure_mcsas3(self) -> bool:
-        if (
-            self._prepare_processing_from_file is not None
-            and self._selected_bundle_from_processing is not None
-            and self._frame_from_bundle is not None
-        ):
+        if self._backend is not None:
             return True
         try:
-            from mcsas3 import prepare_1d_processing_data_from_file, selected_bundle_from_processing
-            from mcsas3.data_adapters import frame_from_bundle
-
-            self._prepare_processing_from_file = prepare_1d_processing_data_from_file
-            self._selected_bundle_from_processing = selected_bundle_from_processing
-            self._frame_from_bundle = frame_from_bundle
+            self._backend = load_mcsas3_backend()
             return True
-        except Exception:
-            pass
-
-        repo_root = Path(__file__).resolve().parents[1]
-        local_src = repo_root.parent / "McSAS3" / "src"
-        if local_src.is_dir():
-            if str(local_src) not in sys.path:
-                sys.path.append(str(local_src))
-            try:
-                from mcsas3 import prepare_1d_processing_data_from_file, selected_bundle_from_processing
-                from mcsas3.data_adapters import frame_from_bundle
-
-                self._prepare_processing_from_file = prepare_1d_processing_data_from_file
-                self._selected_bundle_from_processing = selected_bundle_from_processing
-                self._frame_from_bundle = frame_from_bundle
-                return True
-            except Exception as exc:
-                self._missing_deps = f"Failed to import McSAS3 canonical workflow: {exc}"
-                return False
-
-        self._missing_deps = "McSAS3 could not be imported. Install it or clone it next to this repo."
-        return False
+        except ImportError as exc:
+            self._missing_deps = str(exc)
+            return False
 
     def _load_data(self) -> None:
         self._clear_message()
@@ -254,14 +224,16 @@ class DataLoadingPanel(QWidget):
 
         yaml_text = self.yaml_editor_widget.yaml_editor.toPlainText()
         data_kind = str(self.data_mode_combo.currentData())
+        if self._backend is None:
+            self._set_message("Missing McSAS3 backend.")
+            self.dataChanged.emit()
+            return
         try:
             bundle, used_kind, count = load_data_bundle(
                 data_path,
                 data_kind,
                 yaml_text,
-                self._prepare_processing_from_file,
-                self._selected_bundle_from_processing,
-                self._frame_from_bundle,
+                self._backend,
             )
         except ValueError as exc:
             self._set_message(str(exc))
@@ -317,5 +289,5 @@ class DataLoadingPanel(QWidget):
             return
         self.chi_square_label.setText(f"Reduced chi-square: {value:.4g} (dof={dof}, N={points})")
 
-    def get_data_bundle(self) -> Optional[Any]:
+    def get_data_bundle(self) -> object | None:
         return self._data_bundle

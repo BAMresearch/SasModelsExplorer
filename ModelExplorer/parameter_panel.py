@@ -1,6 +1,6 @@
 # ModelExplorer/parameter_panel.py
 
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 from PyQt6.QtCore import Qt
@@ -73,7 +73,7 @@ class ParameterPanel(QScrollArea):
             self._delete_layout_item(label_item)
             self._delete_layout_item(field_item)
 
-    def _delete_layout_item(self, item) -> None:
+    def _delete_layout_item(self, item: Any) -> None:
         """Recursively delete widgets/layouts contained in a layout item."""
         if item is None:
             return
@@ -88,7 +88,7 @@ class ParameterPanel(QScrollArea):
                 self._delete_layout_item(child)
             layout.deleteLater()
 
-    def create_parameter_input_element(self, parameter) -> QHBoxLayout:
+    def create_parameter_input_element(self, parameter: Any) -> QHBoxLayout:
         """Create a horizontal row for a parameter (label + controls)."""
         param_layout = QHBoxLayout()
 
@@ -120,7 +120,7 @@ class ParameterPanel(QScrollArea):
         pulldown.currentIndexChanged.connect(self._trigger_change)
         return [pulldown]
 
-    def create_log_slider_and_input_elements(self, parameter) -> List[object]:
+    def create_log_slider_and_input_elements(self, parameter: Any) -> List[object]:
         """Build a log slider, input box, and unit label for numeric parameters."""
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setFixedWidth(150)
@@ -137,7 +137,7 @@ class ParameterPanel(QScrollArea):
 
         return [slider, input_box, unit_text]
 
-    def value_to_log_slider(self, value: float, parameter=None) -> int:
+    def value_to_log_slider(self, value: float, parameter: Any = None) -> int:
         """Map a parameter value to its log slider position."""
         min_val, max_val = 1e-6, 1e3
         if parameter is not None:
@@ -156,7 +156,7 @@ class ParameterPanel(QScrollArea):
             value = max_val
         return int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
 
-    def log_slider_to_value(self, slider_pos: int, parameter=None) -> float:
+    def log_slider_to_value(self, slider_pos: int, parameter: Any = None) -> float:
         """Map a log slider position back to the parameter value."""
         min_val, max_val = 1e-6, 1e3
         if parameter is not None:

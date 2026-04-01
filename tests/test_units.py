@@ -4,8 +4,9 @@ from ModelExplorer.utils import units
 
 
 def test_normalize_unit_label_angstrom():
-    assert units.normalize_unit_label("1/\u00c5ngstr\u00f6m") == "1/Angstrom"
-    assert units.normalize_unit_label("\u00c5") == "Angstrom"
+    assert units.normalize_unit_label("1/\u00c5ngstr\u00f6m") == "1/angstrom"
+    assert units.normalize_unit_label("1/Angstrom") == "1/angstrom"
+    assert units.normalize_unit_label("\u00c5") == "angstrom"
 
 
 def test_unit_registry_supports_angstrom_and_percent():

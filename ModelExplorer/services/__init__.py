@@ -1,1 +1,1 @@
-# ModelExplorer/services/__init__.py
+"""Service-layer helpers used by GUI orchestration code."""

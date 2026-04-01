@@ -2,6 +2,7 @@ matplotlib
 numpy
 PyQt6
 sasmodels
+git+https://github.com/BAMresearch/McSAS3.git@in_depth_upgrades#egg=mcsas3
 Pint
 attrs
 PyYAML

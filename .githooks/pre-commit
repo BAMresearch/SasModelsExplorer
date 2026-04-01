@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+CONFIG_PATH="$REPO_ROOT/.pre-commit-config.yaml"
+HOOK_DIR="$REPO_ROOT/.githooks"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  printf "Missing interpreter: %s\n" "$PYTHON_BIN" >&2
+  printf "Run: ./scripts/bootstrap_dev.sh\n" >&2
+  exit 1
+fi
+
+exec "$PYTHON_BIN" -m pre_commit hook-impl \
+  --config="$CONFIG_PATH" \
+  --hook-type=pre-commit \
+  --hook-dir "$HOOK_DIR" \
+  -- "$@"

@@ -1,4 +1,9 @@
+"""Integration-style tests from data loading into fitting."""
+
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from ModelExplorer.services import data_loader
@@ -16,6 +21,27 @@ class DummyBaseData:
 class DummyDataBundle(dict):
     description = None
     default_plot = "signal"
+
+
+class DummyProcessingBackend:
+    def __init__(self, processing):
+        self.processing = processing
+
+    def prepare_processing_from_file(self, data_path, *, result_index, workflow_config):
+        _ = data_path, result_index, workflow_config
+        return self.processing
+
+    def selected_bundle_from_processing(self, processing, *, stage_name):
+        return processing[stage_name]
+
+    def frame_from_bundle(self, bundle):
+        return pd.DataFrame(
+            {
+                "Q": np.asarray(bundle["Q"].signal, dtype=float),
+                "I": np.asarray(bundle["signal"].signal, dtype=float),
+                "ISigma": np.asarray(next(iter(bundle["signal"].uncertainties.values())), dtype=float),
+            }
+        )
 
 
 class DummyModel:
@@ -44,40 +70,21 @@ def _dummy_bundle(q, i, sigma):
     return bundle
 
 
-def _dummy_select_bundle(processing, *, stage_name):
-    return processing[stage_name]
-
-
-def _dummy_frame_from_bundle(bundle):
-    return {
-        "Q": np.asarray(bundle["Q"].signal, dtype=float),
-        "I": np.asarray(bundle["signal"].signal, dtype=float),
-        "ISigma": np.asarray(next(iter(bundle["signal"].uncertainties.values())), dtype=float),
-    }
-
-
 def test_data_to_fit_integration(tmp_path, monkeypatch):
     pytest.importorskip("scipy", reason="scipy not installed")
     data_path = tmp_path / "data.dat"
     data_path.write_text("dummy")
 
-    Q_vals = np.array([0.1, 0.2, 0.3], dtype=float)
-    I_vals = 2.0 * Q_vals
-    sigma = np.full_like(Q_vals, 0.01)
-    processing = {"sample_binned": _dummy_bundle(Q_vals, I_vals, sigma)}
-
-    def prepare_factory(filename, result_index, **_):
-        assert filename == data_path
-        assert result_index == 1
-        return processing
+    q_vals = np.array([0.1, 0.2, 0.3], dtype=float)
+    i_vals = 2.0 * q_vals
+    sigma = np.full_like(q_vals, 0.01)
+    backend = DummyProcessingBackend({"sample_binned": _dummy_bundle(q_vals, i_vals, sigma)})
 
     bundle, used_kind, count = data_loader.load_data_bundle(
         data_path,
         "sample_binned",
         "sourceQUnits: 1/Angstrom\nsourceIntensityUnits: 1/(m sr)",
-        prepare_factory,
-        _dummy_select_bundle,
-        _dummy_frame_from_bundle,
+        backend,
     )
 
     assert used_kind == "sample_binned"
