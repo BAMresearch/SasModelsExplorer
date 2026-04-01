@@ -2,6 +2,7 @@
 
 Related design:
 - `docs/design/internal_maintainability_foundation.md` for service-layer refactor, typing policy, and export-prep contracts.
+- `docs/design/hdf5_state_schema.md` for persisted state-file schema details.
 
 ## Context
 

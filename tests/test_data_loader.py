@@ -154,3 +154,29 @@ def test_load_data_bundle_errors_on_missing_columns(tmp_path):
             "",
             backend,
         )
+
+
+def test_load_data_selection_collects_all_available_stage_bundles(tmp_path):
+    data_path = tmp_path / "data.dat"
+    data_path.write_text("dummy")
+
+    raw_bundle = _dummy_bundle(q=[0.05, 0.1], i=[4.0, 5.0], sigma=[0.2, 0.2])
+    binned_bundle = _dummy_bundle(q=[0.1, 0.2, 0.3], i=[1.0, 2.0, 3.0], sigma=[0.1, 0.1, 0.1])
+    backend = DummyProcessingBackend(
+        {
+            "sample_raw": raw_bundle,
+            "sample_binned": binned_bundle,
+        }
+    )
+
+    selection = data_loader.load_data_selection(
+        data_path,
+        "sample_binned",
+        "",
+        backend,
+    )
+
+    assert selection.bundle is binned_bundle
+    assert selection.used_kind == "sample_binned"
+    assert selection.count == 3
+    assert set(selection.stage_bundles.keys()) == {"sample_raw", "sample_binned"}

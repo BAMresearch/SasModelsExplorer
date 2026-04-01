@@ -1,19 +1,35 @@
 # ModelExplorer/parameter_panel.py
 
+from numbers import Real
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSlider,
     QWidget,
 )
+
+
+class ClickableLabel(QLabel):
+    """QLabel that emits ``clicked`` when left-clicked."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:  # noqa: N802
+        if event is not None and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class ParameterPanel(QScrollArea):
@@ -37,6 +53,7 @@ class ParameterPanel(QScrollArea):
         self.parameter_choosers: Dict[str, QComboBox] = {}
         self.parameter_inputs: Dict[str, QLineEdit] = {}
         self.parameter_checkboxes: Dict[str, object] = {}
+        self.parameter_limit_overrides: Dict[str, tuple[float, float]] = {}
 
     def add_header_row(self, label: str, widget: QWidget) -> None:
         """Add a fixed header row that is not cleared with model changes."""
@@ -51,6 +68,7 @@ class ParameterPanel(QScrollArea):
         self.parameter_choosers.clear()
         self.parameter_inputs.clear()
         self.parameter_checkboxes.clear()
+        self.parameter_limit_overrides.clear()
 
         for parameter in parameters:
             self.parameters[parameter.name] = parameter
@@ -92,8 +110,7 @@ class ParameterPanel(QScrollArea):
         """Create a horizontal row for a parameter (label + controls)."""
         param_layout = QHBoxLayout()
 
-        label = QLabel(parameter.name)
-        label.setToolTip(parameter.description)
+        label = self._create_parameter_label(parameter)
         label.setFixedWidth(100)
 
         choices = getattr(parameter, "choices", None) or []
@@ -126,7 +143,7 @@ class ParameterPanel(QScrollArea):
         slider.setFixedWidth(150)
         slider.setMinimum(0)
         slider.setMaximum(1000)
-        slider.setValue(self.value_to_log_slider(parameter.default, parameter))
+        slider.setValue(self.value_to_log_slider(parameter.default, parameter, parameter.name))
         slider.valueChanged.connect(lambda: self.update_input_box(parameter.name))
 
         input_box = QLineEdit(str(parameter.default))
@@ -137,17 +154,73 @@ class ParameterPanel(QScrollArea):
 
         return [slider, input_box, unit_text]
 
-    def value_to_log_slider(self, value: float, parameter: Any = None) -> int:
-        """Map a parameter value to its log slider position."""
+    def _create_parameter_label(self, parameter: Any) -> QLabel:
+        """Create either a plain or clickable parameter label."""
+
+        description = str(getattr(parameter, "description", ""))
+        if not self._is_numeric_parameter(parameter):
+            label = QLabel(parameter.name)
+            label.setToolTip(description)
+            return label
+
+        label = ClickableLabel(parameter.name)
+        label.setCursor(Qt.CursorShape.PointingHandCursor)
+        font = label.font()
+        font.setUnderline(True)
+        label.setFont(font)
+        label.setStyleSheet("color: #1f6fb7;")
+        suffix = "\nClick to override slider min/max."
+        label.setToolTip(f"{description}{suffix}" if description else suffix.strip())
+        label.clicked.connect(lambda name=parameter.name: self._edit_parameter_limits(name))
+        return label
+
+    def _is_numeric_parameter(self, parameter: Any) -> bool:
+        """Return ``True`` for parameters that use numeric sliders."""
+
+        choices = getattr(parameter, "choices", None) or []
+        if choices:
+            return False
+        default = getattr(parameter, "default", None)
+        return isinstance(default, Real) and not isinstance(default, bool)
+
+    def _effective_limits(self, param_name: str | None, parameter: Any = None) -> tuple[float, float]:
+        """Return effective min/max slider limits for a parameter."""
+
+        if param_name is not None and param_name in self.parameter_limit_overrides:
+            return self.parameter_limit_overrides[param_name]
+
         min_val, max_val = 1e-6, 1e3
         if parameter is not None:
-            min_val = np.maximum(min_val, parameter.limits[0])
-            max_val = np.minimum(parameter.limits[1], max_val)
+            limits = getattr(parameter, "limits", None)
+            if isinstance(limits, (list, tuple)) and len(limits) >= 2:
+                try:
+                    low = float(limits[0])
+                    if np.isfinite(low) and low > 0:
+                        min_val = max(min_val, low)
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    high = float(limits[1])
+                    if np.isfinite(high) and high > min_val:
+                        max_val = high
+                except (TypeError, ValueError):
+                    pass
 
         if not np.isfinite(min_val) or min_val <= 0:
             min_val = 1e-6
         if not np.isfinite(max_val) or max_val <= min_val:
             max_val = min_val * 1e3
+        return float(min_val), float(max_val)
+
+    def get_effective_limits(self, param_name: str) -> tuple[float, float]:
+        """Return active slider limits for a parameter name."""
+
+        parameter = self.parameters.get(param_name)
+        return self._effective_limits(param_name, parameter)
+
+    def value_to_log_slider(self, value: float, parameter: Any = None, param_name: str | None = None) -> int:
+        """Map a parameter value to its log slider position."""
+        min_val, max_val = self._effective_limits(param_name, parameter)
         if not np.isfinite(value) or value <= 0:
             return 0
         if value < min_val:
@@ -156,12 +229,9 @@ class ParameterPanel(QScrollArea):
             value = max_val
         return int(1000 * (np.log10(value) - np.log10(min_val)) / (np.log10(max_val) - np.log10(min_val)))
 
-    def log_slider_to_value(self, slider_pos: int, parameter: Any = None) -> float:
+    def log_slider_to_value(self, slider_pos: int, parameter: Any = None, param_name: str | None = None) -> float:
         """Map a log slider position back to the parameter value."""
-        min_val, max_val = 1e-6, 1e3
-        if parameter is not None:
-            min_val = np.maximum(min_val, parameter.limits[0])
-            max_val = np.minimum(parameter.limits[1], max_val)
+        min_val, max_val = self._effective_limits(param_name, parameter)
 
         if slider_pos == 0:
             return 0
@@ -170,7 +240,11 @@ class ParameterPanel(QScrollArea):
     def update_input_box(self, param_name: str) -> None:
         """Sync the text input when a slider changes and trigger redraw."""
         slider = self.parameter_sliders[param_name]
-        value = self.log_slider_to_value(slider.value(), parameter=self.parameters[param_name])
+        value = self.log_slider_to_value(
+            slider.value(),
+            parameter=self.parameters[param_name],
+            param_name=param_name,
+        )
         input_box = self.parameter_inputs[param_name]
         input_box.setText(f"{value:.6f}")
         self._trigger_change()
@@ -181,16 +255,28 @@ class ParameterPanel(QScrollArea):
         try:
             value = float(input_box.text())
             slider = self.parameter_sliders[param_name]
-            slider.setValue(self.value_to_log_slider(value, self.parameters[param_name]))
+            slider.setValue(
+                self.value_to_log_slider(
+                    value,
+                    self.parameters[param_name],
+                    param_name=param_name,
+                )
+            )
             self._trigger_change()
         except ValueError:
             slider = self.parameter_sliders[param_name]
-            input_box.setText(f"{self.log_slider_to_value(slider.value(), self.parameters[param_name]):.6f}")
+            input_box.setText(
+                f"{self.log_slider_to_value(slider.value(), self.parameters[param_name], param_name=param_name):.6f}"
+            )
 
     def get_values(self) -> Dict[str, float]:
         """Return a dict of current parameter values from all controls."""
         values = {
-            param: self.log_slider_to_value(slider.value(), self.parameters[param])
+            param: self.log_slider_to_value(
+                slider.value(),
+                self.parameters[param],
+                param_name=param,
+            )
             for param, slider in self.parameter_sliders.items()
         }
 
@@ -211,7 +297,13 @@ class ParameterPanel(QScrollArea):
                 input_box = self.parameter_inputs[param_name]
                 slider.blockSignals(True)
                 input_box.blockSignals(True)
-                slider.setValue(self.value_to_log_slider(value, self.parameters[param_name]))
+                slider.setValue(
+                    self.value_to_log_slider(
+                        value,
+                        self.parameters[param_name],
+                        param_name=param_name,
+                    )
+                )
                 input_box.setText(f"{value:.6g}")
                 slider.blockSignals(False)
                 input_box.blockSignals(False)
@@ -229,6 +321,54 @@ class ParameterPanel(QScrollArea):
 
         if emit_change:
             self._trigger_change()
+
+    def _edit_parameter_limits(self, param_name: str) -> None:
+        """Show a dialog to override slider min/max for a numeric parameter."""
+
+        parameter = self.parameters.get(param_name)
+        if parameter is None or param_name not in self.parameter_sliders:
+            return
+
+        current_min, current_max = self._effective_limits(param_name, parameter)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{param_name}: Slider Limits")
+        layout = QFormLayout(dialog)
+        min_input = QLineEdit(f"{current_min:.6g}")
+        max_input = QLineEdit(f"{current_max:.6g}")
+        layout.addRow("Min (> 0):", min_input)
+        layout.addRow("Max (> Min):", max_input)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            new_min = float(min_input.text())
+            new_max = float(max_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Limits", "Slider limits must be numeric values.")
+            return
+
+        if not np.isfinite(new_min) or not np.isfinite(new_max):
+            QMessageBox.warning(self, "Invalid Limits", "Slider limits must be finite.")
+            return
+        if new_min <= 0:
+            QMessageBox.warning(self, "Invalid Limits", "Minimum must be greater than 0 for log sliders.")
+            return
+        if new_max <= new_min:
+            QMessageBox.warning(self, "Invalid Limits", "Maximum must be greater than minimum.")
+            return
+
+        self.parameter_limit_overrides[param_name] = (new_min, new_max)
+        self.update_slider(param_name)
 
     def _trigger_change(self) -> None:
         """Invoke the change callback if provided."""

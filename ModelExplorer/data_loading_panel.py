@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .services.data_loader import load_data_bundle
+from .services.data_loader import load_data_selection
 from .services.mcsas3_backend import ProcessingBackend, load_mcsas3_backend
 from .yaml_editor_widget import YAMLEditorWidget
 
@@ -77,6 +77,7 @@ class DataLoadingPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._data_bundle: object | None = None
+        self._data_bundles_by_stage: dict[str, object] = {}
         self._missing_deps: Optional[str] = None
 
         self._backend: ProcessingBackend | None = None
@@ -205,6 +206,7 @@ class DataLoadingPanel(QWidget):
     def _load_data(self) -> None:
         self._clear_message()
         self._data_bundle = None
+        self._data_bundles_by_stage = {}
 
         file_path = self.file_path_line.text().strip()
         if not file_path:
@@ -229,7 +231,7 @@ class DataLoadingPanel(QWidget):
             self.dataChanged.emit()
             return
         try:
-            bundle, used_kind, count = load_data_bundle(
+            selection = load_data_selection(
                 data_path,
                 data_kind,
                 yaml_text,
@@ -244,8 +246,18 @@ class DataLoadingPanel(QWidget):
             self.dataChanged.emit()
             return
 
-        self._data_bundle = bundle
-        self._set_message(f"Loaded {count} points from {used_kind}.")
+        self._data_bundle = selection.bundle
+        self._data_bundles_by_stage = dict(selection.stage_bundles)
+
+        if selection.used_kind != data_kind:
+            for index in range(self.data_mode_combo.count()):
+                if str(self.data_mode_combo.itemData(index)) == selection.used_kind:
+                    self.data_mode_combo.blockSignals(True)
+                    self.data_mode_combo.setCurrentIndex(index)
+                    self.data_mode_combo.blockSignals(False)
+                    break
+
+        self._set_message(f"Loaded {selection.count} points from {selection.used_kind}.")
         self._maybe_list_hdf5_paths(data_path)
         self.dataChanged.emit()
 
@@ -291,3 +303,141 @@ class DataLoadingPanel(QWidget):
 
     def get_data_bundle(self) -> object | None:
         return self._data_bundle
+
+    def get_yaml_config_text(self) -> str:
+        """Return current YAML configuration text from the editor."""
+
+        return self.yaml_editor_widget.yaml_editor.toPlainText()
+
+    def get_selected_preset_name(self) -> str | None:
+        """Return selected preset filename, or ``None`` for custom/unknown selection."""
+
+        current_data = self.config_combo.currentData()
+        if isinstance(current_data, Path):
+            return current_data.name
+        return None
+
+    def set_yaml_config_text(
+        self,
+        yaml_text: str,
+        *,
+        mark_custom: bool = True,
+        prefer_matching_preset: bool = False,
+        preferred_preset_name: str | None = None,
+    ) -> None:
+        """Set YAML configuration text without triggering an automatic reload."""
+
+        self._suppress_yaml_change = True
+        self.yaml_editor_widget.set_yaml_content(yaml_text)
+        self._suppress_yaml_change = False
+
+        if prefer_matching_preset:
+            selected_index = self._matching_preset_index(yaml_text, preferred_preset_name)
+            if selected_index is not None:
+                self.config_combo.blockSignals(True)
+                self.config_combo.setCurrentIndex(selected_index)
+                self.config_combo.blockSignals(False)
+                return
+
+        if mark_custom:
+            custom_index = self.config_combo.findText("<Custom...>")
+            if custom_index >= 0:
+                self.config_combo.blockSignals(True)
+                self.config_combo.setCurrentIndex(custom_index)
+                self.config_combo.blockSignals(False)
+
+    def _matching_preset_index(self, yaml_text: str, preferred_preset_name: str | None = None) -> int | None:
+        """Return preset combo index if YAML matches a known preset, else ``None``."""
+
+        normalized_target = self._normalize_yaml_text(yaml_text)
+        if not normalized_target:
+            return None
+
+        if preferred_preset_name:
+            preferred_index = self.config_combo.findText(preferred_preset_name)
+            if preferred_index >= 0:
+                preferred_path = self.config_combo.itemData(preferred_index)
+                if isinstance(preferred_path, Path):
+                    try:
+                        preferred_text = preferred_path.read_text(encoding="utf-8")
+                    except Exception:
+                        preferred_text = ""
+                    if self._normalize_yaml_text(preferred_text) == normalized_target:
+                        return preferred_index
+
+        for index in range(self.config_combo.count()):
+            preset_path = self.config_combo.itemData(index)
+            if not isinstance(preset_path, Path):
+                continue
+            try:
+                preset_text = preset_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if self._normalize_yaml_text(preset_text) == normalized_target:
+                return index
+        return None
+
+    @staticmethod
+    def _normalize_yaml_text(yaml_text: str) -> str:
+        """Normalize YAML text for robust preset matching."""
+
+        lines = [line.rstrip() for line in yaml_text.replace("\r\n", "\n").split("\n")]
+        return "\n".join(lines).strip()
+
+    def get_stage_bundles(self) -> dict[str, object]:
+        """Return loaded stage bundles keyed by canonical stage name."""
+
+        return dict(self._data_bundles_by_stage)
+
+    def get_stage_frames(self) -> dict[str, object]:
+        """Return per-stage dataframe projections using the active backend adapter."""
+
+        if self._backend is None:
+            return {}
+        frames: dict[str, object] = {}
+        for stage_name, bundle in self._data_bundles_by_stage.items():
+            try:
+                frames[stage_name] = self._backend.frame_from_bundle(bundle)
+            except Exception:
+                continue
+        return frames
+
+    def set_stage_bundles(
+        self,
+        stage_bundles: dict[str, object],
+        selected_stage: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Set all loaded stage bundles and update currently active bundle."""
+
+        self._data_bundles_by_stage = dict(stage_bundles)
+        if selected_stage and selected_stage in self._data_bundles_by_stage:
+            self._data_bundle = self._data_bundles_by_stage[selected_stage]
+            for index in range(self.data_mode_combo.count()):
+                if str(self.data_mode_combo.itemData(index)) == selected_stage:
+                    self.data_mode_combo.blockSignals(True)
+                    self.data_mode_combo.setCurrentIndex(index)
+                    self.data_mode_combo.blockSignals(False)
+                    break
+        elif self._data_bundles_by_stage:
+            first_stage = next(iter(self._data_bundles_by_stage))
+            self._data_bundle = self._data_bundles_by_stage[first_stage]
+        else:
+            self._data_bundle = None
+
+        if message is not None:
+            self._set_message(message)
+        self.dataChanged.emit()
+
+    def set_data_bundle(self, bundle: object | None, message: str | None = None) -> None:
+        """Set the active overlay data bundle from an external source."""
+
+        self._data_bundle = bundle
+        stage_name = str(self.data_mode_combo.currentData())
+        if bundle is None:
+            self._data_bundles_by_stage = {}
+        else:
+            self._data_bundles_by_stage = {stage_name: bundle}
+        if message is not None:
+            self._set_message(message)
+        self.dataChanged.emit()

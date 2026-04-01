@@ -66,6 +66,8 @@ class FittingPanel(QWidget):
 
         while self._param_layout.count() > 1:
             item = self._param_layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()

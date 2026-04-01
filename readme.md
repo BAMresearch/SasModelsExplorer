@@ -45,6 +45,7 @@ Mypy is used for typed service-layer checks (`mypy`).
 Design notes:
 - `docs/design/processingdata_migration_plan.md` documents the canonical McSAS3/MoDaCor data-model migration.
 - `docs/design/internal_maintainability_foundation.md` documents the maintainability and export-prep architecture.
+- `docs/design/hdf5_state_schema.md` documents the persisted HDF5 save/load contract.
 
 ## Building executables
 

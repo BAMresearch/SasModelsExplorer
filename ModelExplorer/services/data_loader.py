@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -21,10 +22,21 @@ CANONICAL_STAGE_ALIASES = {
     "binnedData": "sample_binned",
 }
 CANONICAL_STAGE_FALLBACKS = ("sample_binned", "sample_clipped", "sample_raw")
+CANONICAL_STAGE_ORDER = ("sample_raw", "sample_clipped", "sample_binned")
 DEFAULT_NBINS = 100
 DEFAULT_IEMIN = 0.01
 DEFAULT_RESULT_INDEX = 1
 DEFAULT_DATA_RANGE = [-np.inf, np.inf]
+
+
+@dataclass(slots=True)
+class LoadedDataSelection:
+    """Loaded stage bundles and the selected bundle used for plotting."""
+
+    bundle: object
+    used_kind: str
+    count: int
+    stage_bundles: dict[str, object]
 
 
 def parse_yaml_config(yaml_text: str) -> DataConfig:
@@ -67,10 +79,28 @@ def load_data_bundle(
 ) -> tuple[object, str, int]:
     """Load, select, and validate a canonical bundle for overlay plotting."""
 
+    selection = load_data_selection(
+        data_path,
+        data_kind,
+        yaml_text,
+        backend,
+    )
+    return selection.bundle, selection.used_kind, selection.count
+
+
+def load_data_selection(
+    data_path: Path,
+    data_kind: str,
+    yaml_text: str,
+    backend: ProcessingBackend,
+) -> LoadedDataSelection:
+    """Load all canonical stage bundles and return selected bundle information."""
+
     raw = _parse_yaml_mapping(yaml_text)
     config = parse_yaml_config(yaml_text)
     processing = _load_processing_data(data_path, raw, config, backend)
-    bundle, used_kind = _select_bundle(processing, data_kind, backend)
+    stage_bundles = _collect_stage_bundles(processing, backend, data_path)
+    bundle, used_kind = _select_bundle_from_map(stage_bundles, data_kind)
     if bundle is None or used_kind is None:
         raise ValueError("No data available after loading.")
 
@@ -79,8 +109,12 @@ def load_data_bundle(
     if q_vals.size == 0:
         raise ValueError("No finite data points found.")
 
-    bundle.description = f"{data_path.name} ({used_kind})"  # type: ignore[attr-defined]
-    return bundle, used_kind, int(q_vals.size)
+    return LoadedDataSelection(
+        bundle=bundle,
+        used_kind=used_kind,
+        count=int(q_vals.size),
+        stage_bundles=stage_bundles,
+    )
 
 
 def _parse_yaml_mapping(yaml_text: str) -> dict[str, object]:
@@ -221,10 +255,30 @@ def _canonical_stage_name(stage_name: str) -> str:
     return CANONICAL_STAGE_ALIASES.get(stage_name, stage_name)
 
 
-def _select_bundle(
+def _collect_stage_bundles(
     processing: object,
-    data_kind: str,
     backend: ProcessingBackend,
+    data_path: Path,
+) -> dict[str, object]:
+    """Collect all canonical non-empty stage bundles from processing data."""
+
+    bundles: dict[str, object] = {}
+    for stage_name in CANONICAL_STAGE_ORDER:
+        try:
+            bundle = backend.selected_bundle_from_processing(processing, stage_name=stage_name)
+            frame = backend.frame_from_bundle(bundle)
+        except Exception:
+            continue
+        if len(frame) <= 0:
+            continue
+        bundle.description = f"{data_path.name} ({stage_name})"  # type: ignore[attr-defined]
+        bundles[stage_name] = bundle
+    return bundles
+
+
+def _select_bundle_from_map(
+    stage_bundles: Mapping[str, object],
+    data_kind: str,
 ) -> tuple[object | None, str | None]:
     """Select requested stage bundle with canonical fallback ordering."""
 
@@ -233,12 +287,8 @@ def _select_bundle(
     lookup_stages.extend(stage for stage in CANONICAL_STAGE_FALLBACKS if stage not in lookup_stages)
 
     for stage_name in lookup_stages:
-        try:
-            bundle = backend.selected_bundle_from_processing(processing, stage_name=stage_name)
-            frame = backend.frame_from_bundle(bundle)
-        except Exception:
-            continue
-        if len(frame) > 0:
+        bundle = stage_bundles.get(stage_name)
+        if bundle is not None:
             return bundle, stage_name
     return None, None
 

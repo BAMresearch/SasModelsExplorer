@@ -5,6 +5,8 @@
 This document captures the internal refactor foundation completed before implementing export UI
 features (McSAS3 run-template export, HDF5 save/load, and CSV export).
 
+For the concrete persisted HDF5 contract, see `docs/design/hdf5_state_schema.md`.
+
 The goals are:
 
 - keep current behavior stable while reducing maintenance cost,
@@ -67,10 +69,26 @@ reworking core state extraction.
 - current transition pin: `mcsas3` installs from branch `in_depth_upgrades` until the next canonical release lands on PyPI.
 - optional integration: `mcsas3gui` via `gui-interop` extra.
 - type-check gate: mypy on core modules configured in `pyproject.toml`.
+- expanded typed UI modules in gate:
+  - `ModelExplorer/export_panel.py`
+  - `ModelExplorer/fitting_panel.py`
 - pre-commit reliability:
   - repo-managed hooks via `.githooks`,
   - stable wrapper hook at `.githooks/pre-commit`,
   - bootstrap command: `./scripts/bootstrap_dev.sh`.
+
+## Typing Backlog (Phase Follow-Up)
+
+Current mypy gate intentionally focuses on service/core modules plus selected UI modules.
+Remaining UI-heavy modules (`modelexplorer.py`, `data_loading_panel.py`, `parameter_panel.py`,
+`modelbrowser.py`, `yaml_editor_widget.py`) still need staged type-hardening due PyQt dynamic APIs.
+
+Recommended order:
+
+1. Define lightweight protocols/dataclasses for UI-to-service payloads currently typed as `object`.
+2. Type-harden `parameter_panel.py` and `fitting_panel.py` interfaces together.
+3. Move HDF5 IO orchestration from `modelexplorer.py` into typed service adapters.
+4. Add targeted mypy module inclusions incrementally after each module is clean.
 
 ## Checklist for Future Developers
 
