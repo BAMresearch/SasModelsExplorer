@@ -1,7 +1,14 @@
 Write-Host "Building SasModelsExplorer executable..."
 
-if (Test-Path ".venv\\Scripts\\Activate.ps1") {
-    . ".venv\\Scripts\\Activate.ps1"
+$python = "python"
+if (Test-Path ".venv\\Scripts\\python.exe") {
+    $python = ".venv\\Scripts\\python.exe"
 }
 
-python "scripts\\build_executable.py"
+& $python -m tox -e standalone
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "If tox is missing, install it with: python -m pip install tox"
+}
+
+exit $LASTEXITCODE

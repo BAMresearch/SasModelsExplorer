@@ -39,9 +39,13 @@ dev = [
   "pre-commit",
   "ruff",
   "mypy",
+  "tox",
 ]
 gui-interop = [
   "mcsas3gui",
+]
+standalone = [
+  "pyinstaller>=6.0",
 ]
 
 [tool.ruff]

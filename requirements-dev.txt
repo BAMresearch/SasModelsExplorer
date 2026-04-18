@@ -2,3 +2,4 @@ pytest
 ruff
 pre-commit
 mypy
+tox

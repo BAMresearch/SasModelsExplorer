@@ -52,13 +52,24 @@ Design notes:
 With your local `.venv` active, run:
 
 ```bash
+python -m pip install tox
+tox -e standalone
+```
+
+The `standalone` tox environment installs the standalone build dependencies (including
+PyInstaller) and runs `scripts/build_executable.py`. The output binary will be placed in
+`dist/SasModelsExplorer`.
+
+You can still run the script directly if needed:
+
+```bash
+python -m pip install pyinstaller
 python scripts/build_executable.py
 ```
 
-This uses PyInstaller with the required `sasmodels` data and submodules bundled. The output binary will be placed in `dist/SasModelsExplorer`.
-
 Windows notes:
 - Use a PowerShell prompt with the `.venv` activated: `.venv\\Scripts\\Activate.ps1`
+- Run the wrapper script with: `.\scripts\build_executable.ps1` (this calls `tox -e standalone`)
 - The executable will be `dist\\SasModelsExplorer.exe`
 
 ## Using the GUI
