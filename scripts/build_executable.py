@@ -29,6 +29,8 @@ def main() -> int:
         "scipy.special._cdflib",
         str(repo_root / "ModelExplorer" / "__main__.py"),
     ]
+    if importlib.util.find_spec("tccbox") is not None:
+        cmd[8:8] = ["--collect-all", "tccbox"]
     print("Running:", " ".join(cmd))
     return subprocess.call(cmd, cwd=repo_root)
 

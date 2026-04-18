@@ -12,6 +12,7 @@ import sasmodels.modelinfo
 from numpy.typing import NDArray
 
 from .utils.list_to_columnar_string import list_to_columnar_string
+from .utils.sasmodels_runtime import configure_sasmodels_runtime
 
 
 class SupportsModelInfo(Protocol):
@@ -26,6 +27,7 @@ class SupportsModelInfo(Protocol):
 def load_model_and_info(model_name: str) -> tuple[SupportsModelInfo, sasmodels.modelinfo.ModelInfo]:
     """Load a sasmodels model and its corresponding ``ModelInfo``."""
 
+    configure_sasmodels_runtime()
     model = sasmodels.core.load_model(model_name)
     model_info = sasmodels.core.load_model_info(model_name)
     return model, model_info
