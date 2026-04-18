@@ -1,29 +1,47 @@
-# ModelExplorer/sasmodels_adapter.py
+"""Adapters around sasmodels APIs used by the GUI."""
 
-from typing import List, Tuple
+from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any, Protocol
+
+import numpy as np
 import sasmodels.core
 import sasmodels.direct_model
 import sasmodels.modelinfo
+from numpy.typing import NDArray
 
 from .utils.list_to_columnar_string import list_to_columnar_string
+from .utils.sasmodels_runtime import configure_sasmodels_runtime
 
 
-def load_model_and_info(model_name: str) -> Tuple[object, sasmodels.modelinfo.ModelInfo]:
-    """Load a sasmodels model and its ModelInfo in one call."""
+class SupportsModelInfo(Protocol):
+    """Protocol for sasmodels model objects that expose ``info.parameters``."""
+
+    info: sasmodels.modelinfo.ModelInfo
+
+    def make_kernel(self, data: list[NDArray[np.float64]]) -> object:
+        """Create a sasmodels kernel for the provided Q-array payload."""
+
+
+def load_model_and_info(model_name: str) -> tuple[SupportsModelInfo, sasmodels.modelinfo.ModelInfo]:
+    """Load a sasmodels model and its corresponding ``ModelInfo``."""
+
+    configure_sasmodels_runtime()
     model = sasmodels.core.load_model(model_name)
     model_info = sasmodels.core.load_model_info(model_name)
     return model, model_info
 
 
 def build_parameter_list(
-    model: object,
+    model: SupportsModelInfo,
     model_info: sasmodels.modelinfo.ModelInfo,
-    pd_types: List[str],
-) -> List[sasmodels.modelinfo.Parameter]:
+    pd_types: Sequence[str],
+) -> list[sasmodels.modelinfo.Parameter]:
     """Build a deduplicated parameter list with polydispersity extras."""
-    parameters: List[sasmodels.modelinfo.Parameter] = []
-    seen_parameters = set()
+
+    parameters: list[sasmodels.modelinfo.Parameter] = []
+    seen_parameters: set[str] = set()
     base_parameters = model_info.parameters.common_parameters + model_info.parameters.call_parameters
 
     for parameter in base_parameters:
@@ -44,32 +62,35 @@ def build_parameter_list(
 
             pd_type_param = sasmodels.modelinfo.Parameter(
                 f"{parameter.name}_pd_type",
-                limits=[[pd_types]],
+                limits=[[list(pd_types)]],
                 units="",
                 default="gaussian",
                 description=f"polydispersity distribution shape for parameter {parameter.name}",
             )
-            pd_type_param.choices = pd_types
+            pd_type_param.choices = list(pd_types)
             parameters.append(pd_type_param)
 
     return parameters
 
 
 def is_magnetic_parameter(name: str) -> bool:
-    """Return True when a parameter name corresponds to magnetic/polarization controls."""
+    """Return ``True`` for magnetic/polarization sasmodels parameters."""
+
     magnetic_suffixes = ("_M0", "_mtheta", "_mphi")
-    if name.startswith("up_"):
-        return True
-    return name.endswith(magnetic_suffixes)
+    return name.startswith("up_") or name.endswith(magnetic_suffixes)
 
 
-def split_magnetic_parameters(parameters: List[sasmodels.modelinfo.Parameter], include_magnetic: bool):
-    """Split parameters into visible list and hidden defaults based on magnetic toggle."""
+def split_magnetic_parameters(
+    parameters: list[sasmodels.modelinfo.Parameter],
+    include_magnetic: bool,
+) -> tuple[list[sasmodels.modelinfo.Parameter], dict[str, Any]]:
+    """Split full parameter list into visible params and hidden magnetic defaults."""
+
     if include_magnetic:
         return parameters, {}
 
-    visible = []
-    hidden_defaults = {}
+    visible: list[sasmodels.modelinfo.Parameter] = []
+    hidden_defaults: dict[str, Any] = {}
     for parameter in parameters:
         if is_magnetic_parameter(parameter.name):
             hidden_defaults[parameter.name] = parameter.default
@@ -78,16 +99,16 @@ def split_magnetic_parameters(parameters: List[sasmodels.modelinfo.Parameter], i
     return visible, hidden_defaults
 
 
-def compute_intensity(kernel, parameters: dict):
-    """Run the sasmodels kernel with parameters and return intensity."""
-    return sasmodels.direct_model.call_kernel(kernel, parameters)
+def compute_intensity(kernel: object, parameters: dict[str, Any]) -> NDArray[np.float64]:
+    """Run a sasmodels kernel and return intensity as float array."""
+
+    return np.asarray(sasmodels.direct_model.call_kernel(kernel, parameters), dtype=float)
 
 
 def generate_model_info_text(ncols: int = 3, padding: str = "   ") -> str:
-    """Generate the help text listing available models by category."""
-    categories = [
-        sasmodels.core.load_model_info(model).category for model in sasmodels.core.list_models()
-    ]
+    """Generate help text listing available models grouped by category."""
+
+    categories = [sasmodels.core.load_model_info(model).category for model in sasmodels.core.list_models()]
     groupings = [category.split(":")[0] for category in categories]
 
     info_text = (

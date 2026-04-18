@@ -33,24 +33,43 @@ cd SasModelsExplorer
 Install dev tools and enable pre-commit hooks:
 
 ```bash
-pip install -r requirements-dev.txt
-pre-commit install
+./scripts/bootstrap_dev.sh
 ```
 
+This sets `core.hooksPath` to `.githooks`, installs pre-commit hooks, and keeps VS Code/CLI commit
+hooks consistent.
+
 Ruff handles linting and formatting (`ruff check` / `ruff format`).
+Mypy is used for typed service-layer and selected UI-module checks (`mypy`).
+
+Design notes:
+- `docs/design/processingdata_migration_plan.md` documents the canonical McSAS3/MoDaCor data-model migration.
+- `docs/design/internal_maintainability_foundation.md` documents the maintainability and export-prep architecture.
+- `docs/design/hdf5_state_schema.md` documents the persisted HDF5 save/load contract.
 
 ## Building executables
 
 With your local `.venv` active, run:
 
 ```bash
+python -m pip install tox
+tox -e standalone
+```
+
+The `standalone` tox environment installs the standalone build dependencies (including
+PyInstaller) and runs `scripts/build_executable.py`. The output binary will be placed in
+`dist/SasModelsExplorer`.
+
+You can still run the script directly if needed:
+
+```bash
+python -m pip install pyinstaller
 python scripts/build_executable.py
 ```
 
-This uses PyInstaller with the required `sasmodels` data and submodules bundled. The output binary will be placed in `dist/SasModelsExplorer`.
-
 Windows notes:
 - Use a PowerShell prompt with the `.venv` activated: `.venv\\Scripts\\Activate.ps1`
+- Run the wrapper script with: `.\scripts\build_executable.ps1` (this calls `tox -e standalone`)
 - The executable will be `dist\\SasModelsExplorer.exe`
 
 ## Using the GUI

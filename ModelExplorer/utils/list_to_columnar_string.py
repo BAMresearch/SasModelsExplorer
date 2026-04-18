@@ -1,45 +1,35 @@
-from typing import List
+"""Formatting helper for display-friendly columnar string lists."""
 
-import numpy as np
+from __future__ import annotations
+
+import math
 
 
 def list_to_columnar_string(
-    ListOfStrings: List[str],
+    values: list[str],
     ncols: int = 2,
-    MinimumColumnWidth: int = 0,
+    minimum_column_width: int = 0,
     padding: str = "  ",
     ordering: str = "columns",
-):
-    """
-    return a string representation of a list of strings.
-    the strings are lined up in a number of columns, newspaper-style.
-    Parameters are:
-    - ListOfStrings : a list of strings to be formatted.
-    - ncols : the number of columns to format them into.
-    - MinimumColumnWidth : the minimum width for each column. Will be expanded to fit the largest string
-    - padding : spacing string between columns, you can even do something fancy like " | "
-    - ordering : 'columns' or 'rows'. If 'columns', then the content will appear in columns (like reading a newspaper), otherwise rows.
-    """
+) -> str:
+    """Format string values into fixed-width columnar text."""
 
-    # only equal-width columns for now... set to the width of the largest single string
-    maxWidth = MinimumColumnWidth
-    maxWidth = np.maximum(maxWidth, max([len(i) for i in ListOfStrings]))
+    if len(values) == 0:
+        return ""
+    if ncols <= 0:
+        raise ValueError("ncols must be a positive integer.")
 
-    # find out where to cut the list into chunks
-    cut = int(np.ceil(len(ListOfStrings) / ncols))
-    # fill out the list so it is divisible by ncols, preventing indexing beyond list
-    while len(ListOfStrings) % ncols != 0:  # odd number of lines
-        ListOfStrings += [""]
+    max_width = max(minimum_column_width, max(len(value) for value in values))
+    cut = int(math.ceil(len(values) / ncols))
+    padded = list(values)
+    while len(padded) % ncols != 0:
+        padded.append("")
 
-    # format each column
-    ColumnarLines = []
-    for rowi in range(cut):
+    columnar_lines: list[str] = []
+    for row_index in range(cut):
         if ordering == "columns":
-            lineString = padding.join([ListOfStrings[rowi + coli * cut].ljust(maxWidth) for coli in range(ncols)])
+            row_values = [padded[row_index + col_index * cut].ljust(max_width) for col_index in range(ncols)]
         else:
-            lineString = padding.join([ListOfStrings[rowi * ncols + coli].ljust(maxWidth) for coli in range(ncols)])
-
-        ColumnarLines.append(lineString + "\n")
-
-    # add it all together
-    return "".join(ColumnarLines)
+            row_values = [padded[row_index * ncols + col_index].ljust(max_width) for col_index in range(ncols)]
+        columnar_lines.append(padding.join(row_values))
+    return "\n".join(columnar_lines) + "\n"
